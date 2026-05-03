@@ -1,0 +1,25 @@
+[Unit]
+Description=AuraSense API gateway (FastAPI/uvicorn)
+After=network-online.target redis.service aurasense-mediamtx.service
+Wants=network-online.target
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+User=aura
+WorkingDirectory=/home/aura/Documents/aurasense/api-gateway
+ExecStart=/home/aura/Documents/aurasense/api-gateway/.venv/bin/uvicorn \
+          main:app --host 0.0.0.0 --port 8000 --no-access-log
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+TimeoutStopSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-api
+
+[Install]
+WantedBy=aurasense.target

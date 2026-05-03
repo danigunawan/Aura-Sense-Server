@@ -1,0 +1,28 @@
+[Unit]
+Description=AuraSense NVR watchdog
+# Start after everything else so first poll sees a stable state
+After=aurasense-mediamtx.service aurasense-api.service aurasense-parking-encoder.service
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+# Root so it can run `systemctl restart` without sudo
+User=root
+ExecStart=/usr/bin/python3 /home/aura/Documents/aurasense/watchdog/watchdog.py
+
+# Create /run/aurasense for the health file
+RuntimeDirectory=aurasense
+RuntimeDirectoryMode=0755
+
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+
+TimeoutStopSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-watchdog
+
+[Install]
+WantedBy=aurasense.target

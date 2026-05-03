@@ -1,0 +1,13 @@
+[Unit]
+Description=AuraSense NVR
+After=network-online.target
+Wants=network-online.target \
+      aurasense-mediamtx.service \
+      aurasense-api.service \
+      aurasense-entrance-encoder.service \
+      aurasense-lobby-encoder.service \
+      aurasense-recording.service \
+      aurasense-watchdog.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+{
+  "name": "aurasense-recording-service",
+  "version": "1.0.0",
+  "description": "AuraSense NVR — per-camera FFmpeg segment recorder with disk rotation",
+  "main": "index.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node index.js",
+    "dev":   "LOG_FFMPEG=1 node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3"
+  }
+}

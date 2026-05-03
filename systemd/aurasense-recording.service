@@ -1,0 +1,26 @@
+[Unit]
+Description=AuraSense Recording Service (FFmpeg segment recorder)
+After=network-online.target aurasense-mediamtx.service
+Wants=network-online.target
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+User=aura
+WorkingDirectory=/home/aura/Documents/aurasense/recording-service
+
+ExecStart=/usr/bin/node index.js
+
+# Give FFmpeg processes time to flush and close the current segment
+TimeoutStopSec=30
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-recording
+
+[Install]
+WantedBy=aurasense.target

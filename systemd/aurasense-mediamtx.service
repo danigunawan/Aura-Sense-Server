@@ -1,0 +1,28 @@
+[Unit]
+Description=AuraSense mediamtx RTSP/WebRTC proxy
+Documentation=https://github.com/bluenviron/mediamtx
+After=network-online.target
+Wants=network-online.target
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+User=aura
+ExecStart=/home/aura/Documents/aurasense/mediamtx \
+          /home/aura/Documents/aurasense/mediamtx-conf/mediamtx.yml
+
+# Restart on any failure; cameras may take 60 s to boot after power loss
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0     # never give up
+
+# Graceful shutdown
+TimeoutStopSec=10
+
+# Logging — journald captures stdout/stderr automatically
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-mediamtx
+
+[Install]
+WantedBy=aurasense.target

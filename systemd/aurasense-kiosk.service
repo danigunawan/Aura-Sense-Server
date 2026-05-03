@@ -1,0 +1,25 @@
+[Unit]
+Description=AuraSense NVR Kiosk (Chromium)
+After=graphical.target aurasense-api.service
+Wants=graphical.target
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+User=aura
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+ExecStart=/home/aura/Documents/aurasense/dashboard/kiosk-start.sh
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=0
+TimeoutStopSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-kiosk
+
+[Install]
+WantedBy=aurasense.target

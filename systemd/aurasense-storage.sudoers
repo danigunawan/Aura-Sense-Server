@@ -1,0 +1,6 @@
+# AuraSense — sudoers rule for storage management
+# Installed to /etc/sudoers.d/aurasense-storage by systemd/install.sh
+# Allows the 'aura' service user to run the format script as root
+# without a password prompt, and nothing else.
+
+aura ALL=(ALL) NOPASSWD: /usr/local/bin/aurasense-format-hdd.sh

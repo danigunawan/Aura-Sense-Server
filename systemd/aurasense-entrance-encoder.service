@@ -1,0 +1,27 @@
+[Unit]
+Description=AuraSense entrance encoder (FFmpeg H.265→H.264)
+After=network-online.target aurasense-mediamtx.service
+Wants=network-online.target
+Requires=aurasense-mediamtx.service
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+User=aura
+ExecStart=/usr/bin/ffmpeg \
+          -rtsp_transport tcp \
+          -i "rtsp://admin:emerald98260@192.168.0.12:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1" \
+          -c:v libx264 -preset ultrafast -tune zerolatency \
+          -b:v 1500k -g 25 -keyint_min 25 -sc_threshold 0 \
+          -c:a aac -b:a 64k \
+          -f rtsp rtsp://127.0.0.1:8554/entrance
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=0
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-entrance-encoder
+
+[Install]
+WantedBy=aurasense.target
