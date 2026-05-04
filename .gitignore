@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Databases / runtime state
+camera_discovery/cameras.db
+camera_discovery/cameras.db-shm
+camera_discovery/cameras.db-wal
+recording-service/*.db
+
+# Recordings / media
+recordings/
+*.mp4
+*.webm
+*.ts
+*.m3u8
+
+# Secrets / local config
+.env
+*.local
+local.properties
+
+# Claude
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
