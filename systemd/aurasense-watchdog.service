@@ -1,7 +1,7 @@
 [Unit]
 Description=AuraSense NVR watchdog
 # Start after everything else so first poll sees a stable state
-After=aurasense-mediamtx.service aurasense-api.service aurasense-parking-encoder.service
+After=aurasense-mediamtx.service aurasense-api.service aurasense-discovery.service
 PartOf=aurasense.target
 
 [Service]

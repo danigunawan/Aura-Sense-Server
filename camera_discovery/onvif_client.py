@@ -1,8 +1,12 @@
 """
-ONVIF camera interrogation.
+ONVIF camera interrogation for a closed, single-brand system.
 
-All onvif-zeep calls are synchronous (zeep uses requests under the hood),
-so every public function here runs inside a ThreadPoolExecutor.
+All cameras share identical ONVIF credentials (no cycling).
+On success, returns both the main stream (H264) and sub stream (H265) RTSP URIs.
+Cameras not matching the allowed manufacturer are rejected before any further work.
+
+All zeep/requests calls are synchronous, so every public entry point runs inside
+a ThreadPoolExecutor.
 """
 
 import asyncio
@@ -10,12 +14,12 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-from urllib.parse import urlparse, urlunparse
+from typing import Optional
+from urllib.parse import quote, urlparse, urlunparse
 
+import requests
 import ssl
 import urllib3
-import requests
 from requests.adapters import HTTPAdapter
 
 import onvif
@@ -24,24 +28,6 @@ from onvif.exceptions import ONVIFError
 from zeep.transports import Transport
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-
-class _LaxSSLAdapter(HTTPAdapter):
-    """Allows legacy cipher suites and rewrites http://host:443 → https://host:443."""
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ctx.set_ciphers('DEFAULT:@SECLEVEL=0')
-        kwargs['ssl_context'] = ctx
-        return super().init_poolmanager(*args, **kwargs)
-
-    def send(self, request, **kwargs):
-        # onvif-zeep builds http://host:443/... — rewrite to https before sending
-        if request.url.startswith('http://') and ':443/' in request.url:
-            request.url = request.url.replace('http://', 'https://', 1)
-        kwargs['verify'] = False
-        return super().send(request, **kwargs)
 
 from models import DiscoveredDevice
 from retry import sync_retry
@@ -52,6 +38,10 @@ _WSDL_DIR = os.path.join(os.path.dirname(os.path.dirname(onvif.__file__)), 'wsdl
 _EXECUTOR  = ThreadPoolExecutor(max_workers=16, thread_name_prefix='onvif')
 
 
+class CameraRejected(Exception):
+    """Camera does not meet allowlist criteria — not an error, skip silently."""
+
+
 @dataclass
 class CameraInfo:
     device_uuid: str
@@ -59,130 +49,242 @@ class CameraInfo:
     model: str
     serial_number: str
     firmware_version: str
-    rtsp_url: str
-    profile_token: str
-    username: str
+    rtsp_url: str           # H264 main stream
+    sub_rtsp_url: str       # H265 sub stream
+    profile_token: str      # main stream ONVIF profile token
+    sub_profile_token: str  # sub stream ONVIF profile token
+
+
+class _LaxSSLAdapter(HTTPAdapter):
+    """Accepts legacy cipher suites; rewrites http://host:443 → https://host:443."""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode    = ssl.CERT_NONE
+        ctx.set_ciphers('DEFAULT:@SECLEVEL=0')
+        kwargs['ssl_context'] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        if request.url.startswith('http://') and ':443/' in request.url:
+            request.url = request.url.replace('http://', 'https://', 1)
+        kwargs['verify'] = False
+        return super().send(request, **kwargs)
 
 
 async def interrogate(
     device: DiscoveredDevice,
-    credentials: List[Tuple[str, str]],
-    timeout: int = 10,
-    max_attempts: int = 3,
-    base_delay: float = 1.0,
-    backoff: float = 2.0,
+    username: str,
+    password: str,
+    rtsp_user: str,
+    rtsp_pass: str,
+    allowed_manufacturer: str,
+    allowed_models: list[str],
+    timeout: int           = 10,
+    max_attempts: int      = 3,
+    base_delay: float      = 1.0,
+    backoff: float         = 2.0,
+    auto_configure_gop: int = 0,
 ) -> Optional[CameraInfo]:
     """
-    Try each credential pair against the device. Returns None if all fail.
-    Runs blocking ONVIF calls in a thread executor.
+    Interrogate one device using a single credential pair.
+
+    Raises CameraRejected if the camera's manufacturer/model is not in the allowlist.
+    Returns None on auth failure or unrecoverable ONVIF error.
     """
     from wsdiscovery import best_device_url
     host, port, url = best_device_url(device)
 
     loop = asyncio.get_running_loop()
+    try:
+        info = await loop.run_in_executor(
+            _EXECUTOR,
+            _interrogate_sync,
+            host, port, username, password, rtsp_user, rtsp_pass, url,
+            allowed_manufacturer, allowed_models,
+            timeout, max_attempts, base_delay, backoff,
+            auto_configure_gop,
+        )
+        return info
+    except CameraRejected:
+        raise
+    except ONVIFError as exc:
+        log.warning("ONVIF auth failed for %s: %s", host, exc)
+        return None
+    except Exception as exc:
+        log.warning("Failed to interrogate %s: %s", host, exc)
+        return None
 
-    for username, password in credentials:
-        try:
-            info = await loop.run_in_executor(
-                _EXECUTOR,
-                _interrogate_sync,
-                host, port, username, password, url,
-                timeout, max_attempts, base_delay, backoff,
-            )
-            log.info("Authenticated %s as '%s'", host, username or '<empty>')
-            return info
-        except ONVIFError as exc:
-            log.debug("Credential ('%s','%s') rejected by %s: %s", username, password, host, exc)
-        except Exception as exc:
-            log.debug("Failed to interrogate %s with ('%s','%s'): %s", host, username, password, exc)
 
-    log.warning("All credentials exhausted for %s", host)
-    return None
-
-
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Blocking helpers (run inside executor threads)
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 def _interrogate_sync(
     host: str,
     port: int,
     username: str,
     password: str,
+    rtsp_user: str,
+    rtsp_pass: str,
     device_url: str,
+    allowed_manufacturer: str,
+    allowed_models: list[str],
     timeout: int,
     max_attempts: int,
     base_delay: float,
     backoff: float,
+    auto_configure_gop: int,
 ) -> CameraInfo:
-    """Connect to a camera, gather device info and one RTSP URL."""
-
     session = requests.Session()
     session.verify = False
     adapter = _LaxSSLAdapter()
     session.mount('https://', adapter)
-    session.mount('http://', adapter)   # catches http://host:443 before rewrite
-    _transport = Transport(timeout=timeout, operation_timeout=timeout, session=session)
+    session.mount('http://', adapter)
+    transport = Transport(timeout=timeout, operation_timeout=timeout, session=session)
 
     @sync_retry(max_attempts=max_attempts, base_delay=base_delay, backoff=backoff,
                 exceptions=(Exception,))
     def _connect() -> ONVIFCamera:
         return ONVIFCamera(host, port, username, password, _WSDL_DIR,
-                           transport=_transport)
+                           transport=transport)
 
     cam = _connect()
 
-    # --- Device info ---
+    # --- Device info and allowlist check ---
     dev_info = cam.devicemgmt.GetDeviceInformation()
+    manufacturer = getattr(dev_info, 'Manufacturer', '') or ''
+    model        = getattr(dev_info, 'Model', '') or ''
 
-    # Stable UUID from endpoint reference; fall back to serial
+    _check_allowlist(host, manufacturer, model, allowed_manufacturer, allowed_models)
+
+    # Stable UUID: endpoint reference URN → serial number → host:port fallback
     uuid_raw = _extract_uuid(device_url) or dev_info.SerialNumber or f"{host}:{port}"
 
     # --- Media profiles ---
-    media      = cam.create_media_service()
-    profiles   = media.GetProfiles()
+    media    = cam.create_media_service()
+    profiles = media.GetProfiles()
     if not profiles:
         raise ONVIFError(f"No media profiles on {host}")
 
-    # Prefer the first main-stream profile (typically highest resolution)
-    profile       = profiles[0]
-    profile_token = profile.token
+    main_profile = profiles[0]
+    sub_profile  = profiles[1] if len(profiles) > 1 else profiles[0]
 
-    # --- RTSP stream URI ---
-    stream_req = media.create_type('GetStreamUri')
-    stream_req.StreamSetup = {
-        'Stream': 'RTP-Unicast',
-        'Transport': {'Protocol': 'RTSP'},
-    }
-    stream_req.ProfileToken = profile_token
-    stream_uri = media.GetStreamUri(stream_req)
-    rtsp_url   = _embed_credentials(stream_uri.Uri, username, password)
+    log.debug(
+        "%s profiles: main=%s sub=%s",
+        host,
+        _profile_label(main_profile),
+        _profile_label(sub_profile),
+    )
+
+    # --- RTSP URIs (credentials come from env, not from ONVIF auth) ---
+    rtsp_url     = _get_stream_uri(media, main_profile.token, rtsp_user, rtsp_pass)
+    sub_rtsp_url = _get_stream_uri(media, sub_profile.token,  rtsp_user, rtsp_pass)
+
+    # --- Optional: set short GOP on main stream for low-latency WebRTC start ---
+    if auto_configure_gop > 0:
+        _try_set_gop(media, main_profile, auto_configure_gop, host)
+
+    log.info(
+        "Authenticated %s (%s %s) — main=%s sub=%s",
+        host, manufacturer, model,
+        _redact_url(rtsp_url), _redact_url(sub_rtsp_url),
+    )
 
     return CameraInfo(
-        device_uuid    = uuid_raw,
-        manufacturer   = getattr(dev_info, 'Manufacturer', '') or '',
-        model          = getattr(dev_info, 'Model', '') or '',
-        serial_number  = getattr(dev_info, 'SerialNumber', '') or '',
-        firmware_version = getattr(dev_info, 'FirmwareVersion', '') or '',
-        rtsp_url       = rtsp_url,
-        profile_token  = profile_token,
-        username       = username,
+        device_uuid       = uuid_raw,
+        manufacturer      = manufacturer,
+        model             = model,
+        serial_number     = getattr(dev_info, 'SerialNumber', '') or '',
+        firmware_version  = getattr(dev_info, 'FirmwareVersion', '') or '',
+        rtsp_url          = rtsp_url,
+        sub_rtsp_url      = sub_rtsp_url,
+        profile_token     = main_profile.token,
+        sub_profile_token = sub_profile.token,
     )
 
 
+def _check_allowlist(
+    host: str,
+    manufacturer: str,
+    model: str,
+    allowed_manufacturer: str,
+    allowed_models: list[str],
+) -> None:
+    """Raise CameraRejected if this camera is not from the approved brand/model set."""
+    if allowed_manufacturer:
+        if not manufacturer.lower().startswith(allowed_manufacturer.lower()):
+            raise CameraRejected(
+                f"{host}: manufacturer '{manufacturer}' not in allowlist "
+                f"(expected '{allowed_manufacturer}')"
+            )
+
+    if allowed_models:
+        model_lower = model.lower()
+        if not any(m.lower() in model_lower for m in allowed_models):
+            raise CameraRejected(
+                f"{host}: model '{model}' not in allowed_models {allowed_models}"
+            )
+
+
+def _get_stream_uri(media, profile_token: str, username: str, password: str) -> str:
+    req = media.create_type('GetStreamUri')
+    req.StreamSetup = {
+        'Stream': 'RTP-Unicast',
+        'Transport': {'Protocol': 'RTSP'},
+    }
+    req.ProfileToken = profile_token
+    uri = media.GetStreamUri(req)
+    return _embed_credentials(uri.Uri, username, password)
+
+
+def _try_set_gop(media, profile, gop: int, host: str) -> None:
+    """Set GovLength (GOP/I-frame interval) on the main stream encoder configuration."""
+    try:
+        vec = profile.VideoEncoderConfiguration
+        if vec is None:
+            return
+        vec.GovLength = gop
+        media.SetVideoEncoderConfiguration({
+            'Configuration': vec,
+            'ForcePersistence': True,
+        })
+        log.info("%s: set GOP to %d frames on profile %s", host, gop, profile.token)
+    except Exception as exc:
+        log.debug("%s: GOP auto-configure skipped (%s)", host, exc)
+
+
+def _profile_label(profile) -> str:
+    try:
+        vec = profile.VideoEncoderConfiguration
+        if vec:
+            res = vec.Resolution
+            enc = vec.Encoding
+            return f"{enc} {res.Width}x{res.Height}"
+    except Exception:
+        pass
+    return profile.token
+
+
 def _extract_uuid(text: str) -> Optional[str]:
-    """Pull the uuid:... portion from an endpoint reference or XAddr."""
     import re
     m = re.search(r'uuid:([a-fA-F0-9\-]{32,})', text)
     return m.group(1) if m else None
 
 
 def _embed_credentials(rtsp_url: str, username: str, password: str) -> str:
-    """Return rtsp://user:pass@host:port/path. Skips if no credentials."""
+    """Return rtsp://user:pass@host:port/path with properly URL-encoded credentials."""
     if not username:
         return rtsp_url
-    parsed   = urlparse(rtsp_url)
-    netloc   = f"{username}:{password}@{parsed.hostname}"
+    parsed = urlparse(rtsp_url)
+    u = quote(username, safe='')
+    p = quote(password, safe='')
+    netloc = f"{u}:{p}@{parsed.hostname}"
     if parsed.port:
         netloc += f":{parsed.port}"
     return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _redact_url(url: str) -> str:
+    import re
+    return re.sub(r'(rtsp://[^:]+:)[^@]+(@)', r'\1***\2', url)

@@ -145,7 +145,8 @@
       "Bash(ffprobe -v error -show_entries stream=codec_name,width,height,duration '/tmp/parking_test_*.mp4')",
       "Bash(ffprobe -v error -show_entries stream=codec_name,width,height,duration '/tmp/lobby_test_*.mp4')",
       "Bash(systemctl show *)",
-      "Bash(/home/aura/Documents/aurasense/api-gateway/.venv/bin/python3 *)"
+      "Bash(/home/aura/Documents/aurasense/api-gateway/.venv/bin/python3 *)",
+      "Bash(/home/aura/Documents/aurasense/camera_discovery/.venv/bin/pip install *)"
     ]
   }
 }

@@ -1,0 +1,37 @@
+[Unit]
+Description=AuraSense camera discovery — ONVIF scan and mediamtx sync
+After=network-online.target aurasense-mediamtx.service
+Wants=network-online.target
+PartOf=aurasense.target
+
+[Service]
+Type=simple
+User=aura
+WorkingDirectory=/home/aura/Documents/aurasense/camera_discovery
+
+# Load credentials from .env — never hardcode passwords in unit files.
+EnvironmentFile=-/home/aura/Documents/aurasense/.env
+
+ExecStart=/home/aura/Documents/aurasense/camera_discovery/.venv/bin/python3 \
+          /home/aura/Documents/aurasense/camera_discovery/main.py
+
+# Restart on any failure — cameras may temporarily disappear during power cycling.
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=0
+
+TimeoutStopSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/aura/Documents/aurasense/camera_discovery
+ReadWritePaths=/home/aura/Documents/aurasense/mediamtx-conf
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aurasense-discovery
+
+[Install]
+WantedBy=aurasense.target

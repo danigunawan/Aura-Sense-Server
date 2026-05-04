@@ -1,14 +1,20 @@
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
 
+def make_slug(name: str) -> str:
+    """Stable, URL-safe slug for mediamtx path names and recording directories."""
+    return re.sub(r'[^a-z0-9-]', '', name.lower().replace(' ', '-'))
+
+
 @dataclass
 class DiscoveredDevice:
     """Raw result from WS-Discovery before ONVIF interrogation."""
-    endpoint: str          # urn:uuid:...
-    xaddrs: list[str]      # device service URLs
-    ip_address: str        # source IP of the probe response
+    endpoint: str       # urn:uuid:...
+    xaddrs: list[str]   # ONVIF device service URLs
+    ip_address: str     # source IP from probe response
 
 
 @dataclass
@@ -21,10 +27,12 @@ class Camera:
     model: str
     serial_number: str
     firmware_version: str
-    rtsp_url: str
-    profile_token: str
-    name: str
-    username: str
+    rtsp_url: str           # H264 main stream — live view, WebRTC
+    sub_rtsp_url: str       # H265 sub stream  — recording, zero transcode
+    profile_token: str      # main stream ONVIF profile token
+    sub_profile_token: str  # sub stream ONVIF profile token
+    slug: str               # mediamtx path name, e.g. "entrance"
+    name: str               # human-readable label
     status: str
     created_at: Optional[datetime] = None
     last_seen: Optional[datetime]  = None

@@ -1,51 +1,40 @@
 logLevel: info
 
-# Local API — used by watchdog for path health checks
+# Internal REST API — used by watchdog health checks and camera discovery sync.
 api: true
 apiAddress: 127.0.0.1:9997
 
-rtspAddress: :8554
-rtpAddress:  :8002
-rtcpAddress: :8003
+# Ports — RTP/RTCP shifted to avoid clash with API gateway on :8000.
+rtspAddress:   :8554
+rtpAddress:    :8002
+rtcpAddress:   :8003
 webrtcAddress: :8889
 hlsAddress:    :8888
+
+# Disabled protocols — SRT and RTMP not needed.
 rtmp: false
 srt:  false
 
+# HLS configuration — low-latency for mobile app (LL-HLS).
+hls: true
+hlsSegmentDuration: 1s
+hlsPartDuration:    200ms
+hlsSegmentMaxSize:  50MB
+
 paths:
-  # ── Entrance (Hikvision 192.168.0.12 — H.265, transcoded via FFmpeg) ─────────
-  # Live view: aurasense-entrance-encoder.service publishes H.264 here
   entrance:
-    source: publisher
-
-  # Recording sub-stream: pulled on demand, copied as-is (H.265 stream copy)
-  entrance-sub:
-    source: "rtsp://admin:emerald98260@192.168.0.12:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
-    rtspTransport: tcp
-    sourceOnDemand: true
-    sourceOnDemandCloseAfter: 10s
-
-  # ── Parking (Hikvision DS-KV6113-PE1 192.168.0.193 — H.264, direct RTSP) ─────
-  # Live view: mediamtx pulls directly; no transcode needed (H.264)
-  parking:
-    source: "rtsp://admin:Emerald98260**7@192.168.0.193:554/"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
     rtspTransport: tcp
     sourceOnDemand: false
-
+  entrance-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  parking:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
   parking-sub:
-    source: "rtsp://admin:Emerald98260**7@192.168.0.193:554/Streaming/Channels/102/"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
     rtspTransport: tcp
-    sourceOnDemand: true
-    sourceOnDemandCloseAfter: 10s
-
-  # ── Lobby (Hikvision NVR iDS-7216HUHI-M2/S 192.168.0.111 — H.265, transcoded) ─
-  # Live view: aurasense-lobby-encoder.service publishes H.264 here
-  lobby:
-    source: publisher
-
-  # Recording sub-stream: NVR sub-channel, pulled on demand
-  lobby-sub:
-    source: "rtsp://admin:Ashwani7*@192.168.0.111:554/Streaming/Unicast/channels/102"
-    rtspTransport: tcp
-    sourceOnDemand: true
-    sourceOnDemandCloseAfter: 10s
+    sourceOnDemand: false

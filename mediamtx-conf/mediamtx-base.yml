@@ -1,0 +1,22 @@
+logLevel: info
+
+# Internal REST API — used by watchdog health checks and camera discovery sync.
+api: true
+apiAddress: 127.0.0.1:9997
+
+# Ports — RTP/RTCP shifted to avoid clash with API gateway on :8000.
+rtspAddress:   :8554
+rtpAddress:    :8002
+rtcpAddress:   :8003
+webrtcAddress: :8889
+hlsAddress:    :8888
+
+# Disabled protocols — SRT and RTMP not needed.
+rtmp: false
+srt:  false
+
+# HLS configuration — low-latency for mobile app (LL-HLS).
+hls: true
+hlsSegmentDuration: 1s
+hlsPartDuration:    200ms
+hlsSegmentMaxSize:  50MB
