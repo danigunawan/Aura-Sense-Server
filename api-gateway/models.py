@@ -76,7 +76,8 @@ class ClipResponse(BaseModel):
     end_time:         datetime
     duration_seconds: float
     size_bytes:       int
-    download_url:     str         # pre-signed, expires in 1 hour
+    download_url:     str         # pre-signed raw H.265 MP4, expires in 1 hour
+    play_url:         str         # pre-signed H.264 transcoded stream, expires in 1 hour
 
 class ClipListResponse(BaseModel):
     items:    list[ClipResponse]

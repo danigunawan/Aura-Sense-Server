@@ -46,11 +46,25 @@ function insertClip({ cameraId, path, startTime, endTime, sizeBytes }) {
     .run(cameraId, path, startTime, endTime, sizeBytes, new Date().toISOString());
 }
 
-// Get oldest clips across all cameras for eviction, ordered oldest first
-function getOldestClips(limit) {
-  return getDb()
-    .prepare(`SELECT id, path, size_bytes FROM clips ORDER BY start_time ASC LIMIT ?`)
-    .all(limit);
+// Returns the oldest calendar day (YYYY-MM-DD) that has clips, or null
+function getOldestClipDay() {
+  const row = getDb()
+    .prepare("SELECT date(start_time) AS day FROM clips ORDER BY start_time ASC LIMIT 1")
+    .get();
+  return row ? row.day : null;
+}
+
+// Deletes all clips whose start_time falls on `day` (YYYY-MM-DD).
+// Returns the file paths that were deleted so the caller can unlink them.
+function deleteClipsByDay(day) {
+  const rows = getDb()
+    .prepare("SELECT id, path FROM clips WHERE date(start_time) = ?")
+    .all(day);
+  if (rows.length === 0) return [];
+  const ids = rows.map(r => r.id);
+  const placeholders = ids.map(() => '?').join(',');
+  getDb().prepare(`DELETE FROM clips WHERE id IN (${placeholders})`).run(...ids);
+  return rows.map(r => r.path);
 }
 
 function deleteClipById(id) {
@@ -75,7 +89,8 @@ module.exports = {
   getDb,
   getActiveCameras,
   insertClip,
-  getOldestClips,
+  getOldestClipDay,
+  deleteClipsByDay,
   deleteClipById,
   getTotalIndexedBytes,
   getIndexedPaths,

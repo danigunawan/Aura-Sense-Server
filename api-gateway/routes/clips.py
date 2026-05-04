@@ -1,19 +1,21 @@
 """
 Playback / clip access.
 
-Clips are recorded as 5-minute MP4 segments by the Recording Service and
-indexed into the `clips` table by the Storage Manager.  This router is
-read-only on that table.
+Clips are recorded as 5-minute MP4 segments (H.265) by the Recording Service
+and indexed into the `clips` table.  This router is read-only on that table.
 
-Download URLs are HMAC-signed with a 1-hour expiry so the mobile app can
-fetch files without a separate auth header (useful for <video> src= tags).
+Two access modes per clip:
+  download_url — raw H.265 MP4, HMAC-signed, 1-hour TTL
+  play_url     — H.264 transcoded via FFmpeg (VAAPI → libx264 fallback),
+                 streamed as fragmented MP4; safe for kiosk/browser playback
 """
 
+import asyncio
 import os
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 import auth
 from deps import DB, User
@@ -21,16 +23,19 @@ from models import ClipListResponse, ClipResponse
 
 router = APIRouter(tags=["clips"])
 
+_VAAPI_DEVICE = "/dev/dri/renderD128"
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _signed_url(request: Request, clip_id: int) -> str:
+def _signed_url(clip_id: int, endpoint: str) -> str:
     sig, exp = auth.sign_clip_url(clip_id, ttl_seconds=3600)
-    base = str(request.base_url).rstrip("/")
-    return f"{base}/clips/{clip_id}/download?sig={sig}&exp={exp}"
+    # Relative path — works through both the Vite dev proxy (/api → :8000)
+    # and production nginx (also mounts API under /api).
+    return f"/api/clips/{clip_id}/{endpoint}?sig={sig}&exp={exp}"
 
 
-def _to_clip(row, camera_name: str, download_url: str) -> ClipResponse:
+def _to_clip(row, camera_name: str) -> ClipResponse:
     start = datetime.fromisoformat(row["start_time"])
     end   = datetime.fromisoformat(row["end_time"])
     return ClipResponse(
@@ -41,8 +46,35 @@ def _to_clip(row, camera_name: str, download_url: str) -> ClipResponse:
         end_time         = end,
         duration_seconds = (end - start).total_seconds(),
         size_bytes       = row["size_bytes"],
-        download_url     = download_url,
+        download_url     = _signed_url(row["id"], "download"),
+        play_url         = _signed_url(row["id"], "play"),
     )
+
+
+def _ffmpeg_webm_args(src_path: str) -> list[str]:
+    """Transcode any input to VP8/Vorbis WebM — royalty-free, plays in every
+    Chromium build including snap (no chromium-ffmpeg dependency).
+    Uses VAAPI VP8 encode when available, falls back to libvpx software."""
+    common_out = [
+        "-c:a", "libvorbis", "-b:a", "32k",
+        "-f", "webm",
+        "pipe:1",
+    ]
+    if os.access(_VAAPI_DEVICE, os.R_OK):
+        return [
+            "ffmpeg", "-hide_banner", "-loglevel", "warning",
+            "-hwaccel", "vaapi", "-hwaccel_device", _VAAPI_DEVICE,
+            "-hwaccel_output_format", "vaapi",
+            "-i", src_path,
+            "-c:v", "vp8_vaapi", "-b:v", "700k",
+            *common_out,
+        ]
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "warning",
+        "-i", src_path,
+        "-c:v", "libvpx", "-b:v", "700k", "-deadline", "realtime", "-cpu-used", "5",
+        *common_out,
+    ]
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -50,7 +82,6 @@ def _to_clip(row, camera_name: str, download_url: str) -> ClipResponse:
 @router.get("/cameras/{camera_id}/clips", response_model=ClipListResponse)
 async def list_clips(
     camera_id: int,
-    request:   Request,
     db:        DB,
     _user:     User,
     from_time: datetime | None = Query(None, alias="from", description="ISO 8601 start filter"),
@@ -96,7 +127,7 @@ async def list_clips(
     ) as cur:
         rows = await cur.fetchall()
 
-    items = [_to_clip(r, camera_name, _signed_url(request, r["id"])) for r in rows]
+    items = [_to_clip(r, camera_name) for r in rows]
 
     return ClipListResponse(
         items    = items,
@@ -140,4 +171,72 @@ async def download_clip(
         media_type        = "video/mp4",
         filename          = filename,
         headers           = {"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.get("/clips/{clip_id}/play")
+async def play_clip(
+    clip_id: int,
+    sig:     str,
+    exp:     int,
+    db:      DB,
+):
+    """
+    Stream clip as VP8/Vorbis WebM for browser/kiosk playback.
+    WebM is royalty-free and plays in all Chromium builds (including snap)
+    without requiring chromium-ffmpeg or any proprietary codec.
+    Uses VAAPI VP8 encode when available, libvpx software otherwise.
+    URL is pre-signed — no Authorization header needed.
+    """
+    if not auth.verify_clip_sig(clip_id, sig, exp):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired link")
+
+    async with db.execute("SELECT path FROM clips WHERE id = ?", (clip_id,)) as cur:
+        row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Clip not found")
+
+    src_path = row["path"]
+    if not os.path.isfile(src_path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Clip file not found on disk")
+
+    # Validate file is readable before starting the stream
+    probe = await asyncio.create_subprocess_exec(
+        "ffprobe", "-hide_banner", "-v", "error",
+        "-select_streams", "v:0", "-show_entries", "stream=codec_name",
+        "-of", "csv=p=0", src_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    probe_out, probe_err = await probe.communicate()
+    if probe.returncode != 0 or not probe_out.strip():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Clip is corrupt: {probe_err.decode(errors='replace').strip()[:120]}",
+        )
+
+    args = _ffmpeg_webm_args(src_path)
+
+    async def _stream():
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            while True:
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
+
+    return StreamingResponse(
+        _stream(),
+        media_type="video/webm",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

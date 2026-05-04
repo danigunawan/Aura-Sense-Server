@@ -61,31 +61,27 @@ class StorageManager {
   }
 
   _evict() {
-    let evicted = 0;
+    let daysEvicted = 0;
 
-    // Keep evicting until we are comfortably under the eviction threshold
     while (true) {
       const freeBytes  = this._getFreeBytes();
       const totalBytes = db.getTotalIndexedBytes();
+      if (totalBytes < cfg.DISK_EVICT_THRESHOLD_BYTES && freeBytes > cfg.MIN_FREE_BYTES) break;
 
-      const safe = totalBytes < cfg.DISK_EVICT_THRESHOLD_BYTES && freeBytes > cfg.MIN_FREE_BYTES;
-      if (safe) break;
-
-      const clips = db.getOldestClips(cfg.EVICT_BATCH);
-      if (clips.length === 0) {
+      const day = db.getOldestClipDay();
+      if (!day) {
         console.warn('[storage] nothing left to evict but still over threshold');
         break;
       }
 
-      for (const clip of clips) {
-        try { fs.unlinkSync(clip.path); } catch (_) { /* already gone */ }
-        db.deleteClipById(clip.id);
-        evicted++;
+      const paths = db.deleteClipsByDay(day);
+      let unlinkCount = 0;
+      for (const p of paths) {
+        try { fs.unlinkSync(p); unlinkCount++; } catch (_) { /* already gone */ }
       }
-    }
 
-    if (evicted > 0) {
-      console.log(`[storage] evicted ${evicted} segments; indexed total now ${_gb(db.getTotalIndexedBytes())} GB`);
+      daysEvicted++;
+      console.log(`[storage] evicted day ${day} (${unlinkCount} files removed); total now ${_gb(db.getTotalIndexedBytes())} GB`);
     }
   }
 

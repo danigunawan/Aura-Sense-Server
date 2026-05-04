@@ -79,7 +79,7 @@ export default function PlayerModal({ camera, prefetchedUrls, onClose }) {
     }
 
     // <video> not mounted yet — store the seek, then trigger the render
-    pendingSeekRef.current = { url: clip.download_url, offsetSec };
+    pendingSeekRef.current = { url: clip.play_url, offsetSec };
     setActiveClip(clip);
   }
 
@@ -198,6 +198,9 @@ export default function PlayerModal({ camera, prefetchedUrls, onClose }) {
               <video
                 ref={videoRef}
                 controls
+                muted
+                autoPlay
+                playsInline
                 style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
               />
             ) : (
