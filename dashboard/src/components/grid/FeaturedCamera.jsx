@@ -18,7 +18,7 @@ export default function FeaturedCamera({ camera, onOpen }) {
     return () => { cancelled = true; };
   }, [camera?.id, isOffline]);
 
-  const whepUrl = streamUrls ? `${streamUrls.webrtc_url}/whep` : null;
+  const whepUrl = streamUrls?.webrtc_url ?? null;
 
   if (!camera) {
     return (

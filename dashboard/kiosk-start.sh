@@ -45,7 +45,7 @@ exec "$BROWSER" \
   --no-first-run \
   --disable-infobars \
   --disable-translate \
-  --disable-features=TranslateUI,OverscrollHistoryNavigation \
+  --disable-features=TranslateUI,OverscrollHistoryNavigation,VaapiVideoDecoder \
   --disable-session-crashed-bubble \
   --disable-restore-session-state \
   --disable-pinch \

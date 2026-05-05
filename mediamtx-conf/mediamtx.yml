@@ -15,26 +15,26 @@ hlsAddress:    :8888
 rtmp: false
 srt:  false
 
-# HLS — regular (non-LL) for reliability over Cloudflare tunnel.
-# LL-HLS blocking requests stall through the tunnel causing segment 404s.
+# HLS configuration — low-latency for mobile app (LL-HLS).
 hls: true
 hlsSegmentDuration: 1s
+hlsPartDuration:    200ms
 hlsSegmentMaxSize:  50MB
 
 paths:
   entrance:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
-    rtspTransport: tcp
-    sourceOnDemand: false
-  entrance-sub:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
-    rtspTransport: tcp
-    sourceOnDemand: false
-  parking:
     source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
     rtspTransport: tcp
     sourceOnDemand: false
-  parking-sub:
+  entrance-sub:
     source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  parking:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  parking-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
     rtspTransport: tcp
     sourceOnDemand: false
