@@ -49,6 +49,17 @@ systemctl enable aurasense-watchdog.service
 systemctl enable aurasense-recording.service
 systemctl enable aurasense-kiosk.service
 
+# Enable cloudflared tunnel only if already configured
+if [ -f /etc/cloudflared/config.yml ]; then
+    systemctl enable cloudflared.service
+    echo "    cloudflared enabled (config found)"
+else
+    echo ""
+    echo "    NOTE: Cloudflare Tunnel not yet configured."
+    echo "    Run once to set up cloud access:"
+    echo "      sudo ${SCRIPT_DIR}/../cloudflared/setup.sh <your-domain.com>"
+fi
+
 echo ""
 echo "Done. To start everything now:"
 echo "    sudo systemctl start aurasense.target"
@@ -65,6 +76,7 @@ echo "    sudo systemctl status aurasense-*"
 echo "    journalctl -u aurasense-discovery -f     # camera scan logs"
 echo "    journalctl -u aurasense-mediamtx -f      # stream proxy logs"
 echo "    journalctl -u aurasense-recording -f     # recording logs"
+echo "    journalctl -u cloudflared -f             # cloud tunnel logs"
 echo "    journalctl -u aurasense-* --since -1h"
 echo "    cat /run/aurasense/health.json | python3 -m json.tool"
 echo "    cd ${BASE_DIR}/camera_discovery && python main.py --list"

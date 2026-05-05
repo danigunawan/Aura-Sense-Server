@@ -15,10 +15,10 @@ hlsAddress:    :8888
 rtmp: false
 srt:  false
 
-# HLS configuration — low-latency for mobile app (LL-HLS).
+# HLS — regular (non-LL) for reliability over Cloudflare tunnel.
+# LL-HLS blocking requests stall through the tunnel causing segment 404s.
 hls: true
 hlsSegmentDuration: 1s
-hlsPartDuration:    200ms
 hlsSegmentMaxSize:  50MB
 
 paths:

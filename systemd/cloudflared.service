@@ -1,0 +1,22 @@
+[Unit]
+Description=AuraSense Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+# Start after AuraSense services so the tunnel comes up with live endpoints
+After=aurasense.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml run
+Restart=on-failure
+RestartSec=10s
+# Exponential back-off cap at 5 min to handle extended internet outages
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Give the tunnel time to drain in-flight LL-HLS long-poll requests on stop
+TimeoutStopSec=35s
+
+[Install]
+WantedBy=multi-user.target

@@ -62,7 +62,7 @@ async def get_stream_urls(camera_id: int, db: DB, _user: User):
         camera_id  = cam["id"],
         name       = cam["name"],
         webrtc_url = f"{base_webrtc}/{key}",
-        hls_url    = f"{base_hls}/{key}",
+        hls_url    = f"{base_hls}/{key}-sub",
         rtsp_url   = f"rtsp://localhost:8554/{key}",
         stream_key = key,
     )
