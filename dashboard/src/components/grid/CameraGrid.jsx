@@ -1,25 +1,43 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import FeaturedCamera from './FeaturedCamera.jsx';
 import CameraRow from './CameraRow.jsx';
 
+const BANNER_INTERVAL = 7000;
+
 export default function CameraGrid({ cameras, onOpenCamera }) {
-  const [featuredId, setFeaturedId] = useState(null);
+  const [featuredIndex, setFeaturedIndex] = useState(0);
+  const timerRef = useRef(null);
 
-  const onlineCameras  = cameras.filter(c => c.status === 'online');
-  const offlineCameras = cameras.filter(c => c.status !== 'online');
+  function startTimer(len) {
+    clearInterval(timerRef.current);
+    if (len > 1) {
+      timerRef.current = setInterval(
+        () => setFeaturedIndex(i => (i + 1) % len),
+        BANNER_INTERVAL,
+      );
+    }
+  }
 
-  // Featured: user-pinned → first online → first camera overall
-  const featuredCam = featuredId
-    ? cameras.find(c => c.id === featuredId) ?? onlineCameras[0] ?? cameras[0]
-    : onlineCameras[0] ?? cameras[0];
+  useEffect(() => {
+    startTimer(cameras.length);
+    return () => clearInterval(timerRef.current);
+  }, [cameras.length]); // eslint-disable-line
 
-  const shelfCameras   = cameras.filter(c => c.id !== featuredCam?.id);
-  const shelfOffline   = offlineCameras.filter(c => c.id !== featuredCam?.id);
+  const safeIndex  = cameras.length ? featuredIndex % cameras.length : 0;
+  const featuredCam = cameras[safeIndex] ?? null;
+
+  function onFeature(cameraId) {
+    const idx = cameras.findIndex(c => c.id === cameraId);
+    if (idx >= 0) { setFeaturedIndex(idx); startTimer(cameras.length); }
+  }
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
       <FeaturedCamera
-        camera={featuredCam ?? null}
+        camera={featuredCam}
+        cameras={cameras}
+        featuredIndex={safeIndex}
+        onDotClick={i => { setFeaturedIndex(i); startTimer(cameras.length); }}
         onOpen={onOpenCamera}
       />
 
@@ -27,24 +45,12 @@ export default function CameraGrid({ cameras, onOpenCamera }) {
         {cameras.length === 0 ? (
           <EmptyState />
         ) : (
-          <>
-            {shelfCameras.length > 0 && (
-              <CameraRow
-                label="All Cameras"
-                cameras={shelfCameras}
-                onOpenCamera={onOpenCamera}
-                onFeature={setFeaturedId}
-              />
-            )}
-            {shelfOffline.length > 0 && (
-              <CameraRow
-                label="Offline"
-                cameras={shelfOffline}
-                onOpenCamera={onOpenCamera}
-                onFeature={setFeaturedId}
-              />
-            )}
-          </>
+          <CameraRow
+            label="All Cameras"
+            cameras={cameras}
+            onOpenCamera={onOpenCamera}
+            onFeature={onFeature}
+          />
         )}
       </div>
     </div>
