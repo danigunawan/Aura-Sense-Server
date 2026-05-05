@@ -1,5 +1,7 @@
+import asyncio
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 
 from deps import DB, User, Admin
 from models import CameraDetailResponse, CameraListResponse, CameraResponse, MessageResponse, UpdateCameraRequest
@@ -98,6 +100,43 @@ async def update_camera(camera_id: int, body: UpdateCameraRequest, db: DB, _user
     await db.execute("UPDATE cameras SET name = ? WHERE id = ?", (body.name, camera_id))
     await db.commit()
     return MessageResponse(message=f"Camera renamed to '{body.name}'")
+
+
+@router.get("/{camera_id}/snapshot")
+async def get_snapshot(camera_id: int, db: DB, _user: User):
+    """Grab a single JPEG frame from the camera via mediamtx's local RTSP relay."""
+    async with db.execute("SELECT name FROM cameras WHERE id = ?", (camera_id,)) as cur:
+        cam = await cur.fetchone()
+    if not cam:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Camera not found")
+
+    key = cam["name"].lower().replace(" ", "-")
+    rtsp_url = f"rtsp://localhost:8554/{key}"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-rtsp_transport", "tcp",
+            "-i", rtsp_url,
+            "-vframes", "1",
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "pipe:1",
+            "-loglevel", "quiet",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Snapshot timed out")
+    except Exception as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Snapshot error: {e}")
+
+    if not stdout:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No frame captured")
+
+    return Response(content=stdout, media_type="image/jpeg",
+                    headers={"Cache-Control": "max-age=10"})
 
 
 @router.delete("/{camera_id}", response_model=MessageResponse)
