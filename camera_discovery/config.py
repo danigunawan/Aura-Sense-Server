@@ -53,6 +53,18 @@ class Config:
     # Value is frames (25 = 1 s at 25 fps). Set to 0 to skip auto-configuration.
     auto_configure_gop: int   = int(os.getenv('CAMERA_AUTO_CONFIGURE_GOP', '25'))
 
+    # Static IP assignment via ONVIF ─────────────────────────────────────────
+    # Set CAMERA_STATIC_IP_ENABLED=true and configure the pool to auto-assign
+    # a static IP to each new camera the moment it's added to the database.
+    # The camera reboots after assignment; the next scan cycle sees it at the
+    # new address.  All IPs already in the DB are skipped automatically.
+    static_ip_enabled: bool  = os.getenv('CAMERA_STATIC_IP_ENABLED', 'false').lower() == 'true'
+    static_ip_start: str     = os.getenv('CAMERA_STATIC_IP_POOL_START', '192.168.1.100')
+    static_ip_end: str       = os.getenv('CAMERA_STATIC_IP_POOL_END',   '192.168.1.199')
+    static_ip_gateway: str   = os.getenv('CAMERA_STATIC_IP_GATEWAY',    '192.168.1.1')
+    static_ip_prefix: int    = int(os.getenv('CAMERA_STATIC_IP_PREFIX_LEN', '24'))
+    static_ip_dns: str       = os.getenv('CAMERA_STATIC_IP_DNS',         '8.8.8.8')
+
     default_names: List[str] = field(default_factory=lambda: [
         'Entrance', 'Parking', 'Lobby', 'Hallway',
         'Stairwell', 'Rooftop', 'Perimeter', 'Loading Dock',

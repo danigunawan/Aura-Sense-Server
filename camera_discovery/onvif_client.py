@@ -204,6 +204,117 @@ def _interrogate_sync(
     )
 
 
+async def set_static_ip(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    static_ip: str,
+    prefix_len: int,
+    gateway: str,
+    dns: str,
+    timeout: int = 10,
+) -> None:
+    """
+    Assign a static IPv4 address to the camera via ONVIF SetNetworkInterfaces
+    and reboot it so the change takes effect.  The camera will be unreachable
+    for ~30–60 s while it reboots; the next discovery cycle will find it at
+    its new address.
+
+    Raises on failure so the caller can log and skip without crashing.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _EXECUTOR,
+        _set_static_ip_sync,
+        host, port, username, password,
+        static_ip, prefix_len, gateway, dns, timeout,
+    )
+
+
+def _set_static_ip_sync(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    static_ip: str,
+    prefix_len: int,
+    gateway: str,
+    dns: str,
+    timeout: int,
+) -> None:
+    session = requests.Session()
+    session.verify = False
+    adapter = _LaxSSLAdapter()
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    transport = Transport(timeout=timeout, operation_timeout=timeout, session=session)
+
+    cam = ONVIFCamera(host, port, username, password, _WSDL_DIR, transport=transport)
+
+    # ── Find the first wired Ethernet interface token ──────────────────────
+    interfaces = cam.devicemgmt.GetNetworkInterfaces()
+    token = None
+    for iface in interfaces:
+        # Pick the first enabled wired interface (skip loopback / disabled)
+        if getattr(iface, 'Enabled', True) and getattr(iface, 'token', None):
+            hw = getattr(iface, 'Info', None)
+            if hw and getattr(hw, 'HwAddress', None):
+                # Prefer interfaces that have a real MAC (i.e. real NICs)
+                token = iface.token
+                break
+            elif token is None:
+                token = iface.token  # fallback: first interface found
+
+    if token is None:
+        raise RuntimeError(f"{host}: no network interface found via ONVIF")
+
+    # ── Build SetNetworkInterfaces request ─────────────────────────────────
+    req = cam.devicemgmt.create_type('SetNetworkInterfaces')
+    req.InterfaceToken = token
+    req.NetworkInterface = {
+        'IPv4': {
+            'Enabled': True,
+            'Config': {
+                'DHCP': False,
+                'Manual': [{'Address': static_ip, 'PrefixLength': prefix_len}],
+            },
+        },
+        'IPv6': {'Enabled': False},
+    }
+
+    # Optional: set default gateway and DNS (best-effort — some cameras ignore these)
+    try:
+        gw_req = cam.devicemgmt.create_type('SetNetworkDefaultGateway')
+        gw_req.IPv4Address = [gateway]
+        cam.devicemgmt.SetNetworkDefaultGateway(gw_req)
+    except Exception as exc:
+        log.debug("%s: SetNetworkDefaultGateway skipped (%s)", host, exc)
+
+    try:
+        dns_req = cam.devicemgmt.create_type('SetDNS')
+        dns_req.FromDHCP = False
+        dns_req.DNSManual = [{'Type': 'IPv4', 'IPv4Address': dns}]
+        cam.devicemgmt.SetDNS(dns_req)
+    except Exception as exc:
+        log.debug("%s: SetDNS skipped (%s)", host, exc)
+
+    result = cam.devicemgmt.SetNetworkInterfaces(req)
+    log.info(
+        "%s: static IP %s/%d set (token=%s, reboot_needed=%s)",
+        host, static_ip, prefix_len, token,
+        getattr(result, 'RebootNeeded', '?'),
+    )
+
+    # Reboot so the new address takes effect
+    try:
+        cam.devicemgmt.SystemReboot()
+        log.info("%s: reboot triggered — camera will return at %s", host, static_ip)
+    except Exception as exc:
+        # Some cameras close the connection mid-reboot; this is expected.
+        log.debug("%s: reboot response error (likely mid-reboot disconnect): %s", host, exc)
+
+
 def _check_allowlist(
     host: str,
     manufacturer: str,

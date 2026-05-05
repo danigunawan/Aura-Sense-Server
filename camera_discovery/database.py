@@ -45,6 +45,7 @@ _NEW_COLUMNS: list[tuple[str, str]] = [
     ('sub_rtsp_url',      "TEXT NOT NULL DEFAULT ''"),
     ('sub_profile_token', 'TEXT'),
     ('slug',              "TEXT NOT NULL DEFAULT ''"),
+    ('static_ip',         'TEXT'),
 ]
 
 
@@ -125,6 +126,22 @@ class CameraDB:
         await self._db.execute(
             "UPDATE cameras SET status = 'error', last_error = ? WHERE device_uuid = ?",
             (error, device_uuid),
+        )
+        await self._db.commit()
+
+    async def get_assigned_static_ips(self) -> List[str]:
+        """Return all static IPs already reserved in the DB (used for pool allocation)."""
+        async with self._db.execute(
+            "SELECT static_ip FROM cameras WHERE static_ip IS NOT NULL"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [r["static_ip"] for r in rows]
+
+    async def update_static_ip(self, device_uuid: str, static_ip: str) -> None:
+        """Record the static IP that was assigned to a camera via ONVIF."""
+        await self._db.execute(
+            "UPDATE cameras SET static_ip = ? WHERE device_uuid = ?",
+            (static_ip, device_uuid),
         )
         await self._db.commit()
 
@@ -219,5 +236,6 @@ def _row_to_camera(row: aiosqlite.Row) -> Camera:
         slug=row["slug"] if "slug" in keys else "",
         name=row["name"],
         status=row["status"],
+        static_ip=row["static_ip"] if "static_ip" in keys else None,
         last_error=row["last_error"],
     )

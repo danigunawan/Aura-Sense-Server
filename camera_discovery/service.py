@@ -7,6 +7,7 @@ the local LAN may have non-Prama devices like routers, NAS, printers).
 """
 
 import asyncio
+import ipaddress
 import logging
 from typing import Optional
 
@@ -185,6 +186,10 @@ class DiscoveryService:
         else:
             log.info("Updated existing camera '%s' @ %s", name, host)
 
+        # Assign static IP to newly discovered cameras (if enabled).
+        if is_new and self._cfg.static_ip_enabled:
+            await self._assign_static_ip(camera, host)
+
         # Hot-add paths to running mediamtx (non-blocking, failures tolerated).
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
@@ -210,6 +215,71 @@ class DiscoveryService:
         while f"Camera-{n}" in used:
             n += 1
         return f"Camera-{n}"
+
+    async def _assign_static_ip(self, camera: Camera, current_host: str) -> None:
+        """
+        Pick the next free IP from the pool and push it to the camera via ONVIF.
+        Stores the reserved IP in the DB immediately so concurrent assignments
+        don't collide.  The camera reboots; the next scan cycle re-discovers it
+        at the new address.
+        """
+        cfg = self._cfg
+        try:
+            static_ip = await self._next_free_ip()
+        except ValueError as exc:
+            log.error("Static IP pool exhausted: %s", exc)
+            return
+
+        # Reserve in DB before the ONVIF call so parallel assignments don't clash.
+        await self._db.update_static_ip(camera.device_uuid, static_ip)
+
+        log.info(
+            "Assigning static IP %s/%d (gw=%s) to camera '%s' @ %s",
+            static_ip, cfg.static_ip_prefix, cfg.static_ip_gateway,
+            camera.name, current_host,
+        )
+        try:
+            await onvif_client.set_static_ip(
+                host       = current_host,
+                port       = camera.port,
+                username   = cfg.onvif_user,
+                password   = cfg.onvif_pass,
+                static_ip  = static_ip,
+                prefix_len = cfg.static_ip_prefix,
+                gateway    = cfg.static_ip_gateway,
+                dns        = cfg.static_ip_dns,
+                timeout    = cfg.onvif_timeout,
+            )
+            await self._db.log_event(
+                'static_ip_assigned',
+                f"Assigned static IP {static_ip} to '{camera.name}' (was {current_host})",
+                camera_uuid = camera.device_uuid,
+                ip_address  = current_host,
+            )
+        except Exception as exc:
+            log.error(
+                "Failed to set static IP on camera '%s' @ %s: %s",
+                camera.name, current_host, exc,
+            )
+            # Release the reservation so it can be retried next cycle.
+            await self._db.update_static_ip(camera.device_uuid, None)
+
+    async def _next_free_ip(self) -> str:
+        """Return the lowest IP in the pool not already assigned in the DB."""
+        start  = ipaddress.IPv4Address(self._cfg.static_ip_start)
+        end    = ipaddress.IPv4Address(self._cfg.static_ip_end)
+        in_use = set(await self._db.get_assigned_static_ips())
+
+        ip = start
+        while ip <= end:
+            candidate = str(ip)
+            if candidate not in in_use:
+                return candidate
+            ip += 1
+
+        raise ValueError(
+            f"All IPs in pool {self._cfg.static_ip_start}–{self._cfg.static_ip_end} are taken"
+        )
 
     async def _assign_slug(self, device_uuid: str, name: str) -> str:
         existing = await self._db.get_by_uuid(device_uuid)

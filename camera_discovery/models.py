@@ -34,6 +34,7 @@ class Camera:
     slug: str               # mediamtx path name, e.g. "entrance"
     name: str               # human-readable label
     status: str
+    static_ip: Optional[str]       = None  # assigned static IP, None if still on DHCP
     created_at: Optional[datetime] = None
     last_seen: Optional[datetime]  = None
     last_error: Optional[str]      = None
