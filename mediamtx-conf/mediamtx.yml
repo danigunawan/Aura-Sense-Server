@@ -21,6 +21,10 @@ hlsSegmentDuration: 1s
 hlsPartDuration:    200ms
 hlsSegmentMaxSize:  50MB
 
+webrtcICEServers2:
+  - url: stun:stun.l.google.com:19302
+  - url: stun:stun1.l.google.com:19302
+
 paths:
   entrance:
     source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"

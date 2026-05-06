@@ -58,13 +58,25 @@ async def get_stream_urls(camera_id: int, db: DB, _user: User):
     base_webrtc = config.mediamtx_url.rstrip("/")
     base_hls    = config.mediamtx_hls_url.rstrip("/")
 
+    ice_servers: list[dict] = [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+    ]
+    if config.turn_url:
+        ice_servers.append({
+            "urls": [config.turn_url],
+            "username": config.turn_username,
+            "credential": config.turn_credential,
+        })
+
     return StreamUrlsResponse(
-        camera_id  = cam["id"],
-        name       = cam["name"],
-        webrtc_url = f"{base_webrtc}/{key}/whep",
-        hls_url    = f"{base_hls}/{key}-sub",
-        rtsp_url   = f"rtsp://localhost:8554/{key}",
-        stream_key = key,
+        camera_id   = cam["id"],
+        name        = cam["name"],
+        webrtc_url  = f"{base_webrtc}/{key}/whep",
+        hls_url     = f"{base_hls}/{key}",
+        rtsp_url    = f"rtsp://localhost:8554/{key}",
+        stream_key  = key,
+        ice_servers = ice_servers,
     )
 
 

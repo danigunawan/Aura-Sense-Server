@@ -18,6 +18,10 @@ class _Config:
     mediamtx_url:            str  = os.getenv('MEDIAMTX_URL', 'http://localhost:8889')
     mediamtx_hls_url:        str  = os.getenv('MEDIAMTX_HLS_URL', 'http://localhost:8888')
     log_level:               str  = os.getenv('LOG_LEVEL', 'info')
+    # TURN server — optional; if unset, STUN-only (fine for dual-stack IPv6 networks)
+    turn_url:                str  = os.getenv('TURN_URL', '')
+    turn_username:           str  = os.getenv('TURN_USERNAME', '')
+    turn_credential:         str  = os.getenv('TURN_CREDENTIAL', '')
 
 
 config = _Config()
