@@ -30,6 +30,9 @@ recordings/
 *.webm
 *.ts
 *.m3u8
+# Whitelist the dashboard component dir — the `recordings/` pattern above
+# is meant for on-disk media, not source code.
+!dashboard/src/components/recordings/
 
 # Secrets / local config
 .env

@@ -64,23 +64,14 @@ export default function LoginPage({ onLogin }) {
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <div style={{
-            width:          56,
-            height:         56,
-            borderRadius:   16,
-            background:    'var(--accent)',
-            display:       'inline-flex',
-            alignItems:    'center',
-            justifyContent: 'center',
-            marginBottom:   18,
-            boxShadow:     '0 8px 32px rgba(10,132,255,0.4)',
-          }}>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/>
-            </svg>
-          </div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.04em' }}>AuraSense</h1>
+          <img
+            src="/logo.png"
+            alt="6th Sense"
+            width={72}
+            height={72}
+            style={{ borderRadius: '50%', marginBottom: 18, boxShadow: '0 8px 32px rgba(255,255,255,0.15)' }}
+          />
+          <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.04em' }}>6th Sense</h1>
           <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 5, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
             NVR Dashboard
           </p>

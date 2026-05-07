@@ -3,7 +3,7 @@ import StatusDot from '../ui/StatusDot.jsx';
 
 const NAV_ITEMS = [
   { id: 'live',     label: 'Live' },
-  { id: 'playback', label: 'Playback' },
+  { id: 'playback', label: 'Recordings' },
   { id: 'alerts',   label: 'Alerts' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -39,24 +39,15 @@ export default function NavBar({ active, onChange, systemStatus, visible }) {
 
       {/* Logo + wordmark */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 52, flexShrink: 0 }}>
-        <div style={{
-          width:          30,
-          height:         30,
-          borderRadius:   8,
-          background:    'var(--accent)',
-          display:       'flex',
-          alignItems:    'center',
-          justifyContent: 'center',
-          flexShrink:     0,
-          boxShadow:     '0 0 16px rgba(10,132,255,0.35)',
-        }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/>
-          </svg>
-        </div>
+        <img
+          src="/logo.png"
+          alt="6th Sense"
+          width={30}
+          height={30}
+          style={{ borderRadius: '50%', flexShrink: 0, boxShadow: '0 0 16px rgba(255,255,255,0.15)' }}
+        />
         <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: '-0.04em', color: '#fff' }}>
-          AURASENSE
+          6TH SENSE
         </span>
       </div>
 

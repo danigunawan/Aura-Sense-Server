@@ -811,7 +811,7 @@ function SystemSection() {
     <div>
       <SectionHeader
         title="System"
-        subtitle="Stop all AuraSense services. You will need to restart them manually or via systemd."
+        subtitle="Stop all 6th Sense services. You will need to restart them manually or via systemd."
       />
 
       {error && (

@@ -27,21 +27,14 @@ export default function Sidebar({ active, onChange, systemStatus }) {
         alignItems:    'center',
         gap:            10,
       }}>
-        <div style={{
-          width:          28,
-          height:         28,
-          borderRadius:   8,
-          background:    'var(--accent)',
-          display:       'flex',
-          alignItems:    'center',
-          justifyContent: 'center',
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" />
-          </svg>
-        </div>
-        <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>AuraSense</span>
+        <img
+          src="/logo.png"
+          alt="6th Sense"
+          width={28}
+          height={28}
+          style={{ borderRadius: '50%' }}
+        />
+        <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>6th Sense</span>
       </div>
 
       {/* Nav items */}

@@ -3,6 +3,7 @@ import { useCameras, useSystemStatus } from './hooks/useCameras.js';
 import NavBar      from './components/layout/NavBar.jsx';
 import CameraGrid  from './components/grid/CameraGrid.jsx';
 import PlayerModal from './components/player/PlayerModal.jsx';
+import RecordingsPage from './components/recordings/RecordingsPage.jsx';
 import SettingsPage from './components/settings/SettingsPage.jsx';
 
 export default function App() {
@@ -56,10 +57,7 @@ export default function App() {
           </div>
         )}
         {page === 'playback' && (
-          <PlaceholderPage
-            title="Playback"
-            subtitle="Open a camera from Live View, then switch to the Playback tab inside the player."
-          />
+          <RecordingsPage cameras={cameras} />
         )}
         {page === 'alerts' && (
           <PlaceholderPage title="Alerts" subtitle="No alerts configured yet." />
