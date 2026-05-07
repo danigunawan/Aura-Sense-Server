@@ -46,7 +46,7 @@ function refreshCameras() {
     // Start recorders for any new camera
     for (const camera of active) {
       if (!recorders.has(camera.id)) {
-        console.log(`[manager] new camera: "${camera.name}" (id=${camera.id}, slug=${slugify(camera.name)})`);
+        console.log(`[manager] new camera: "${camera.name}" (id=${camera.id}, slug=${camera.slug || slugify(camera.name)})`);
         startRecorder(camera);
       }
     }

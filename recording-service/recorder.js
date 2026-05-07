@@ -43,12 +43,15 @@ function parseFilenameTime(filePath) {
 
 class CameraRecorder extends EventEmitter {
   /**
-   * @param {{ id: number, name: string, rtsp_url: string }} camera
+   * @param {{ id: number, name: string, slug?: string, rtsp_url: string }} camera
    */
   constructor(camera) {
     super();
     this.camera      = camera;
-    this.slug        = slugify(camera.name);
+    // Prefer the persisted slug — discovery sets it once and it stays stable
+    // across renames, matching the mediamtx path key. Fall back to deriving
+    // from the name only for legacy rows that predate the column.
+    this.slug        = camera.slug || slugify(camera.name);
     this.outDir      = path.join(cfg.RECORDINGS_ROOT, this.slug);
     this.csvPath     = path.join(this.outDir, 'segments.csv');
 

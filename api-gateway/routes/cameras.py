@@ -105,12 +105,13 @@ async def update_camera(camera_id: int, body: UpdateCameraRequest, db: DB, _user
 @router.get("/{camera_id}/snapshot")
 async def get_snapshot(camera_id: int, db: DB, _user: User):
     """Grab a single JPEG frame from the camera via mediamtx's local RTSP relay."""
-    async with db.execute("SELECT name FROM cameras WHERE id = ?", (camera_id,)) as cur:
+    async with db.execute("SELECT name, slug FROM cameras WHERE id = ?", (camera_id,)) as cur:
         cam = await cur.fetchone()
     if not cam:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Camera not found")
 
-    key = cam["name"].lower().replace(" ", "-")
+    # mediamtx paths are keyed on the stored slug (stable across renames).
+    key = cam["slug"] or cam["name"].lower().replace(" ", "-")
     rtsp_url = f"rtsp://localhost:8554/{key}"
 
     try:

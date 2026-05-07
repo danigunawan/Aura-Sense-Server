@@ -32,7 +32,7 @@ function getDb() {
 // Returns all cameras with status='online'
 function getActiveCameras() {
   return getDb()
-    .prepare(`SELECT id, name, rtsp_url FROM cameras WHERE status != 'offline' ORDER BY id`)
+    .prepare(`SELECT id, name, slug, rtsp_url FROM cameras WHERE status != 'offline' ORDER BY id`)
     .all();
 }
 

@@ -47,14 +47,17 @@ async def get_stream_urls(camera_id: int, db: DB, _user: User):
     No session is created — these are permanent relay URLs from the proxy.
     """
     async with db.execute(
-        "SELECT id, name FROM cameras WHERE id = ?", (camera_id,)
+        "SELECT id, name, slug FROM cameras WHERE id = ?", (camera_id,)
     ) as cur:
         cam = await cur.fetchone()
 
     if not cam:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Camera not found")
 
-    key = cam["name"].lower().replace(" ", "-")
+    # Use the persisted slug — it's the actual mediamtx routing key, written
+    # by discovery and stable across renames. Legacy rows that predate the
+    # column fall back to a name-derived slug so they keep working.
+    key = cam["slug"] or cam["name"].lower().replace(" ", "-")
     base_webrtc = config.mediamtx_url.rstrip("/")
     base_hls    = config.mediamtx_hls_url.rstrip("/")
 
