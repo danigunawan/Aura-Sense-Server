@@ -7,12 +7,14 @@
  * No decode/encode: -c copy.  H.265 gets -tag:v hvc1 so MP4 players
  * can parse it without probing.
  *
- * Segment detection: FFmpeg appends each completed segment to segments.csv
- * (format: path,start_sec,end_sec).  We poll that file every 5 s so we
- * know exactly when a segment is closed and safe to index.
+ * Segment detection: poll the output directory every CSV_POLL_INTERVAL_MS
+ * for closed segments and index any MP4 the DB doesn't already know about.
+ * The directory listing is the source of truth — segments.csv is generated
+ * by FFmpeg but its rewrite-vs-append behaviour drifts between FFmpeg
+ * versions, which silently broke a previous CSV-byte-offset implementation.
  *
  * On crash: exponential backoff restart up to RESTART_MAX_MS.
- * On startup: backfill any MP4 files in the output dir not yet in the DB.
+ * On startup: same scan; idempotent thanks to db.getIndexedPaths dedup.
  */
 
 const EventEmitter = require('events');
@@ -50,11 +52,10 @@ class CameraRecorder extends EventEmitter {
     this.outDir      = path.join(cfg.RECORDINGS_ROOT, this.slug);
     this.csvPath     = path.join(this.outDir, 'segments.csv');
 
-    this._proc        = null;
-    this._stopped     = false;
-    this._restartN    = 0;
-    this._csvOffset   = 0;
-    this._pollTimer   = null;
+    this._proc      = null;
+    this._stopped   = false;
+    this._restartN  = 0;
+    this._pollTimer = null;
   }
 
   start() {
@@ -62,7 +63,7 @@ class CameraRecorder extends EventEmitter {
     this._ensureDir();
     this._backfill();
     this._spawnFfmpeg();
-    this._startCsvPoll();
+    this._startIndexPoll();
     console.log(`[${this.slug}] recorder started`);
   }
 
@@ -104,10 +105,9 @@ class CameraRecorder extends EventEmitter {
         if (sizeBytes < 1024) continue; // skip empty/corrupt files
 
         this._indexSegment(filePath, startTime, endTime, sizeBytes);
-        console.log(`[${this.slug}] backfilled ${path.basename(filePath)}`);
       }
     } catch (err) {
-      console.warn(`[${this.slug}] backfill error: ${err.message}`);
+      console.warn(`[${this.slug}] index scan error: ${err.message}`);
     }
   }
 
@@ -185,60 +185,11 @@ class CameraRecorder extends EventEmitter {
     setTimeout(() => { this._restartN = 0; }, 60_000);
   }
 
-  // Poll segments.csv for lines added since last check
-  _startCsvPoll() {
-    // Set initial offset to current file size so we don't re-index old entries
-    try {
-      this._csvOffset = fs.statSync(this.csvPath).size;
-    } catch (_) {
-      this._csvOffset = 0;
-    }
-
-    this._pollTimer = setInterval(() => this._pollCsv(), cfg.CSV_POLL_INTERVAL_MS);
-  }
-
-  _pollCsv() {
-    try {
-      const stat = fs.statSync(this.csvPath);
-      if (stat.size <= this._csvOffset) return;
-
-      const fd  = fs.openSync(this.csvPath, 'r');
-      const len = stat.size - this._csvOffset;
-      const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, this._csvOffset);
-      fs.closeSync(fd);
-      this._csvOffset = stat.size;
-
-      const lines = buf.toString('utf8').split('\n').filter(l => l.trim());
-      for (const line of lines) this._processCsvLine(line);
-    } catch (_) {
-      // CSV not created yet (FFmpeg hasn't finished first segment)
-    }
-  }
-
-  // CSV format written by FFmpeg: <path>,<start_sec>,<end_sec>
-  // FFmpeg writes relative filenames when the list and output share a directory.
-  _processCsvLine(line) {
-    const parts = line.split(',');
-    if (parts.length < 1) return;
-
-    const raw = parts[0].trim();
-    if (!raw.endsWith('.mp4')) return;
-
-    // Resolve to absolute so fs.statSync and db path are correct
-    const filePath = path.isAbsolute(raw) ? raw : path.join(this.outDir, raw);
-
-    // Use filename as authoritative wall-clock start time
-    const startTime = parseFilenameTime(filePath);
-    if (!startTime) return;
-
-    const endTime = new Date(startTime.getTime() + cfg.SEGMENT_DURATION_SEC * 1000);
-
-    let sizeBytes = 0;
-    try { sizeBytes = fs.statSync(filePath).size; } catch (_) { return; }
-    if (sizeBytes < 1024) return; // ignore empty/corrupt files
-
-    this._indexSegment(filePath, startTime, endTime, sizeBytes);
+  // Periodically rescan the output directory and index any closed segments
+  // the DB doesn't already know about. Idempotent: getIndexedPaths dedup +
+  // skip-last (still being written) + size>=1024 corruption guard.
+  _startIndexPoll() {
+    this._pollTimer = setInterval(() => this._backfill(), cfg.CSV_POLL_INTERVAL_MS);
   }
 
   _indexSegment(filePath, startTime, endTime, sizeBytes) {
