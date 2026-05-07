@@ -208,7 +208,7 @@ function CamerasSection() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Name', 'IP Address', 'Model', 'Status', 'Last Seen', ''].map(h => (
+              {['Name', 'Model', 'Status', 'Last Seen', ''].map(h => (
                 <th key={h} style={{
                   textAlign: 'left', padding: '8px 12px 10px',
                   fontSize: 11, fontWeight: 600,
@@ -245,9 +245,6 @@ function CamerasSection() {
                   ) : (
                     <span style={{ fontWeight: 500 }}>{cam.name}</span>
                   )}
-                </td>
-                <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 12 }}>
-                  {cam.ip_address}
                 </td>
                 <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                   {[cam.manufacturer, cam.model].filter(Boolean).join(' ') || '—'}
@@ -287,7 +284,7 @@ function CamerasSection() {
           <div style={{ padding: '28px 28px 24px', width: 360 }}>
             <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Delete Camera</h3>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
-              Remove <strong>{deleting.name}</strong> ({deleting.ip_address}) from the database?
+              Remove <strong>{deleting.name}</strong> from the database?
               This won't affect the physical camera or its streams.
             </p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
