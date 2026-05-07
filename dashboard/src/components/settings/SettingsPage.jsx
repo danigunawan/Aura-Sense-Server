@@ -87,10 +87,7 @@ function DiscoverySection() {
 
   return (
     <div>
-      <SectionHeader
-        title="Camera Discovery"
-        subtitle="Scan your local network for ONVIF cameras and RTSP streams"
-      />
+      <SectionHeader title="Camera Discovery" />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <Button
