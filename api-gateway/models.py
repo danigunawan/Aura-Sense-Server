@@ -50,13 +50,14 @@ class CameraListResponse(BaseModel):
 # ── Live streams ──────────────────────────────────────────────────────────────
 
 class StreamUrlsResponse(BaseModel):
-    camera_id:   int
-    name:        str
-    webrtc_url:  str        # WHEP endpoint for WebRTC playback
-    hls_url:     str        # HLS fallback
-    rtsp_url:    str        # for VLC / NVR client / recording service
-    stream_key:  str        # path name on mediamtx (e.g. "entrance")
-    ice_servers: list[dict] = []  # RTCIceServer objects for Android RTCConfiguration
+    camera_id:       int
+    name:            str
+    webrtc_url:      str        # WHEP endpoint — main stream, for fullscreen player
+    webrtc_sub_url:  str        # WHEP endpoint — sub-stream, for multi-camera grid
+    hls_url:         str        # HLS fallback
+    rtsp_url:        str        # for VLC / NVR client / recording service
+    stream_key:      str        # path name on mediamtx (e.g. "entrance")
+    ice_servers:     list[dict] = []  # RTCIceServer objects for Android RTCConfiguration
 
 class StreamResponse(BaseModel):
     session_id:    str            # ephemeral viewer device ID

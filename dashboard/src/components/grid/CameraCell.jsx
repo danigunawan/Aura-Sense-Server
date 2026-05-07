@@ -112,9 +112,6 @@ export default function CameraCell({ camera, onOpen, onFeature }) {
           <div style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.01em' }}>
             {camera.name}
           </div>
-          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.38)', marginTop: 2, fontFamily: 'monospace' }}>
-            {camera.ip_address}
-          </div>
         </div>
 
         {/* Hover: expand indicator */}

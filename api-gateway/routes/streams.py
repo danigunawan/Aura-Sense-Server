@@ -70,13 +70,14 @@ async def get_stream_urls(camera_id: int, db: DB, _user: User):
         })
 
     return StreamUrlsResponse(
-        camera_id   = cam["id"],
-        name        = cam["name"],
-        webrtc_url  = f"{base_webrtc}/{key}/whep",
-        hls_url     = f"{base_hls}/{key}",
-        rtsp_url    = f"rtsp://localhost:8554/{key}",
-        stream_key  = key,
-        ice_servers = ice_servers,
+        camera_id      = cam["id"],
+        name           = cam["name"],
+        webrtc_url     = f"{base_webrtc}/{key}/whep",
+        webrtc_sub_url = f"{base_webrtc}/{key}-sub/whep",
+        hls_url        = f"{base_hls}/{key}",
+        rtsp_url       = f"rtsp://localhost:8554/{key}",
+        stream_key     = key,
+        ice_servers    = ice_servers,
     )
 
 

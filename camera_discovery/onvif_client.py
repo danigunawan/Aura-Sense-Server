@@ -181,9 +181,15 @@ def _interrogate_sync(
     rtsp_url     = _get_stream_uri(media, main_profile.token, rtsp_user, rtsp_pass)
     sub_rtsp_url = _get_stream_uri(media, sub_profile.token,  rtsp_user, rtsp_pass)
 
-    # --- Optional: set short GOP on main stream for low-latency WebRTC start ---
+    # --- Optional: set short GOP for low-latency WebRTC start ---
+    # Apply to both profiles: main feeds the dashboard/desktop player, sub feeds
+    # the Android grid and recording. Without this, low-motion sub streams emit
+    # an IDR every several seconds and WebRTC viewers see a black cell until
+    # the next keyframe arrives.
     if auto_configure_gop > 0:
         _try_set_gop(media, main_profile, auto_configure_gop, host)
+        if sub_profile.token != main_profile.token:
+            _try_set_gop(media, sub_profile, auto_configure_gop, host)
 
     log.info(
         "Authenticated %s (%s %s) — main=%s sub=%s",
@@ -350,7 +356,7 @@ def _get_stream_uri(media, profile_token: str, username: str, password: str) -> 
 
 
 def _try_set_gop(media, profile, gop: int, host: str) -> None:
-    """Set GovLength (GOP/I-frame interval) on the main stream encoder configuration."""
+    """Set GovLength (GOP/I-frame interval) on the given profile's encoder configuration."""
     try:
         vec = profile.VideoEncoderConfiguration
         if vec is None:

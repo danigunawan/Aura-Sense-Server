@@ -1,12 +1,27 @@
-import { useState } from 'react';
-import { useSnapshot } from '../../hooks/useSnapshots.js';
+import { useState, useEffect } from 'react';
 import StatusDot from '../ui/StatusDot.jsx';
+import LivePlayer from '../player/LivePlayer.jsx';
+import { api } from '../../api/client.js';
 
 export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotClick, onOpen }) {
   const [hovered, setHovered] = useState(false);
-  const { src: snapSrc } = useSnapshot(camera?.id, 30_000);
+  const [streamUrls, setStreamUrls] = useState(null);
 
   const isOffline = camera?.status !== 'online';
+
+  // Refetch stream URLs whenever the carousel rotates to a new camera. Reset
+  // first so the previous camera's video doesn't briefly bleed into the new cell.
+  useEffect(() => {
+    setStreamUrls(null);
+    if (!camera || isOffline) return;
+    let cancelled = false;
+    api.streamUrls(camera.id)
+      .then(u => { if (!cancelled) setStreamUrls(u); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [camera?.id, isOffline]);
+
+  const whepUrl = streamUrls?.webrtc_url ?? null;
 
   if (!camera) {
     return (
@@ -38,17 +53,15 @@ export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotCl
         key={camera.id}
         style={{ position: 'absolute', inset: 0, animation: 'bannerFade 0.55s ease' }}
       >
-        {/* Gradient base (always visible; snapshot overlays when loaded) */}
+        {/* Cinematic gradient — visible underneath the live feed during connect. */}
         <div style={{
           position: 'absolute', inset: 0,
           background: 'linear-gradient(135deg, #0d1b2a 0%, #1a1a2e 35%, #16213e 65%, #0f3460 100%)',
         }} />
-        {snapSrc && !isOffline && (
-          <img
-            src={snapSrc}
-            alt={camera.name}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
+        {whepUrl && !isOffline && (
+          <div style={{ position: 'absolute', inset: 0 }}>
+            <LivePlayer whepUrl={whepUrl} objectFit="cover" background="transparent" />
+          </div>
         )}
       </div>
 
@@ -111,14 +124,11 @@ export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotCl
         </div>
         <h2 style={{
           fontSize: 'clamp(26px, 3.5vw, 48px)', fontWeight: 800,
-          lineHeight: 1.05, letterSpacing: '-0.03em', marginBottom: 8,
+          lineHeight: 1.05, letterSpacing: '-0.03em', marginBottom: 0,
           textShadow: '0 2px 12px rgba(0,0,0,0.4)',
         }}>
           {camera.name}
         </h2>
-        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>
-          {[camera.manufacturer, camera.model, camera.ip_address].filter(Boolean).join(' · ')}
-        </p>
       </div>
 
       {/* Watch Live button — appears on hover */}

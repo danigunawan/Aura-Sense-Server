@@ -25,7 +25,7 @@ function detectVideoCodec(sdp) {
  * Connects to mediamtx via WHEP (WebRTC-HTTP Egress Protocol).
  * whepUrl: e.g. http://localhost:8889/entrance/whep
  */
-export default function LivePlayer({ whepUrl, objectFit = 'contain' }) {
+export default function LivePlayer({ whepUrl, objectFit = 'contain', background = '#000' }) {
   const videoRef = useRef(null);
   const pcRef    = useRef(null);
   const [state,    setState]    = useState('connecting');
@@ -93,7 +93,7 @@ export default function LivePlayer({ whepUrl, objectFit = 'contain' }) {
   }, [whepUrl]);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000',
+    <div style={{ width: '100%', height: '100%', position: 'relative', background,
                   display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <video
         ref={videoRef}
@@ -104,7 +104,8 @@ export default function LivePlayer({ whepUrl, objectFit = 'contain' }) {
           width:      '100%',
           height:     '100%',
           objectFit,
-          display:    state === 'playing' ? 'block' : 'none',
+          opacity:    state === 'playing' ? 1 : 0,
+          transition: 'opacity 0.35s ease-out',
         }}
       />
 
@@ -124,15 +125,39 @@ export default function LivePlayer({ whepUrl, objectFit = 'contain' }) {
       )}
 
       {state === 'connecting' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-                      color: 'var(--text-secondary)', position: 'absolute' }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: '50%',
-            border: '2px solid var(--surface-mid)', borderTopColor: 'var(--accent)',
-            animation: 'spin 0.7s linear infinite',
-          }} />
-          <span style={{ fontSize: 12 }}>Connecting…</span>
-          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background:
+            'radial-gradient(ellipse at 50% 45%, rgba(10,132,255,0.12) 0%, transparent 55%),' +
+            'linear-gradient(180deg, rgba(7,8,9,0.55) 0%, rgba(7,8,9,0.85) 100%)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+          transition: 'opacity 0.35s ease-out',
+        }}>
+          <div style={{ position: 'relative', width: 44, height: 44,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{
+              position: 'absolute', inset: 0, borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(10,132,255,0.30) 0%, transparent 70%)',
+              animation: 'lpAura 1.8s ease-in-out infinite',
+            }} />
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%',
+              border: '1.5px solid rgba(255,255,255,0.06)',
+              borderTopColor: '#0A84FF',
+              borderRightColor: 'rgba(10,132,255,0.55)',
+              boxShadow: '0 0 14px rgba(10,132,255,0.45)',
+              animation: 'lpSpin 1.1s cubic-bezier(.55,.15,.45,.85) infinite',
+            }} />
+          </div>
+          <style>{`
+            @keyframes lpSpin { to { transform: rotate(360deg) } }
+            @keyframes lpAura {
+              0%, 100% { transform: scale(0.85); opacity: 0.55 }
+              50%      { transform: scale(1.45); opacity: 0 }
+            }
+          `}</style>
         </div>
       )}
       {state === 'error' && (
