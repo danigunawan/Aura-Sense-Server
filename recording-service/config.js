@@ -10,18 +10,22 @@ module.exports = {
   // Shared SQLite DB (camera_discovery + api-gateway)
   DB_PATH: '/home/aura/Documents/aurasense/camera_discovery/cameras.db',
 
-  // Segment length in seconds (300 = 5 minutes)
-  SEGMENT_DURATION_SEC: 300,
+  // Segment length in seconds. Shorter = lower lag between "now" and the
+  // most-recent indexed clip, since a segment isn't playable (and isn't
+  // indexed) until ffmpeg finalises it by starting the next one. 60 s is a
+  // good trade-off: ~1 min lag instead of ~5 min, with 5× more files per
+  // camera per day (still trivial for 24/7 storage budgets).
+  SEGMENT_DURATION_SEC: 60,
 
   // ── Storage caps ────────────────────────────────────────────────────────────
-  // Hard cap: never exceed this on the recordings partition (200 GB of 224 GB)
-  DISK_CAP_BYTES: 200 * 1024 * 1024 * 1024,
+  // Hard cap: never exceed this on the recordings partition (3.8 TB of 4 TB)
+  DISK_CAP_BYTES: 3800 * 1024 * 1024 * 1024,
 
-  // Start evicting (oldest-first) when used exceeds this (190 GB)
-  DISK_EVICT_THRESHOLD_BYTES: 190 * 1024 * 1024 * 1024,
+  // Start evicting (oldest-first) when used exceeds this (3.7 TB)
+  DISK_EVICT_THRESHOLD_BYTES: 3700 * 1024 * 1024 * 1024,
 
-  // Always keep at least this many free bytes on the partition (20 GB)
-  MIN_FREE_BYTES: 20 * 1024 * 1024 * 1024,
+  // Always keep at least this many free bytes on the partition (200 GB)
+  MIN_FREE_BYTES: 200 * 1024 * 1024 * 1024,
 
   // How many clips to delete per eviction pass
   EVICT_BATCH: 20,

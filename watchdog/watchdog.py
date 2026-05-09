@@ -7,10 +7,8 @@ Every POLL_INTERVAL seconds:
   2. Check the API gateway /health endpoint — log if unreachable.
   3. Write /run/aurasense/health.json so the dashboard can surface it.
 
-Stream recovery:
-  - entrance / lobby: FFmpeg encoder services managed by systemd (Restart=always)
-  - parking: mediamtx direct RTSP source (auto-retried by mediamtx)
-  No manual restarts needed here.
+Camera paths are discovered dynamically from the mediamtx API — no hardcoded
+list. Sub-streams (slug ending in -sub) are on-demand and are not monitored.
 
 All output goes to stdout; systemd routes it to journald automatically.
 Run with: journalctl -u aurasense-watchdog -f
@@ -31,10 +29,6 @@ POLL_INTERVAL  = 30          # seconds between health checks
 MEDIAMTX_API   = "http://127.0.0.1:9997"
 API_HEALTH_URL = "http://127.0.0.1:8000/health"
 HEALTH_FILE    = "/run/aurasense/health.json"
-
-# Paths that must be ready at all times (main live-view streams).
-# Sub streams are on-demand; watchdog ignores them.
-REQUIRED_PATHS = ["entrance", "lobby", "parking"]
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -77,16 +71,16 @@ def check_mediamtx(health: dict) -> list[str]:
     health["mediamtx"] = "ok"
     health["paths"] = {}
 
-    for name in REQUIRED_PATHS:
-        if name not in path_map:
-            issues.append(f"path '{name}' not registered in mediamtx")
-            health["paths"][name] = "missing"
-            continue
+    # Derive monitored paths dynamically — main streams only (skip -sub and placeholder ~)
+    main_paths = [n for n in path_map if not n.endswith("-sub") and n != "~"]
 
-        p = path_map[name]
-        ready = p.get("ready", False)
+    if not main_paths:
+        health["paths"]["_note"] = "no cameras registered yet"
+        return issues
+
+    for name in main_paths:
+        ready = path_map[name].get("ready", False)
         health["paths"][name] = "ready" if ready else "not_ready"
-
         if not ready:
             issues.append(f"path '{name}' not ready — source may be reconnecting")
 

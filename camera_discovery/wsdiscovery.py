@@ -9,6 +9,7 @@ Runs the blocking socket work in a thread executor.
 import asyncio
 import fcntl
 import logging
+import os
 import select
 import socket
 import struct
@@ -92,6 +93,20 @@ def _probe_sync(timeout: float) -> List[DiscoveredDevice]:
     devices: List[DiscoveredDevice] = []
 
     iface_ips = _get_interface_ips()
+
+    # If DISCOVERY_INTERFACE is set, restrict probes to that NIC only so
+    # WS-Discovery multicast goes out the camera network interface, not the
+    # internet-facing NIC.
+    bind_ip = os.getenv("DISCOVERY_INTERFACE", "").strip()
+    if bind_ip:
+        if bind_ip in iface_ips:
+            iface_ips = [bind_ip]
+        else:
+            log.warning(
+                "DISCOVERY_INTERFACE=%s not in local IPs %s — scanning all interfaces",
+                bind_ip, iface_ips,
+            )
+
     log.debug("WS-Discovery scanning on interfaces: %s", iface_ips)
 
     sockets = []

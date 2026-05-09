@@ -1,54 +1,47 @@
 #!/usr/bin/env bash
-# AuraSense NVR — Full-screen kiosk launcher
-# Starts the Vite dev server if not already running, then opens Chromium in kiosk mode.
-# Run at boot via systemd or autostart. See QUICKSTART.md for setup instructions.
+# AuraSense NVR — Kiosk launcher (production mode)
+# Waits for the API gateway to be ready, then opens Chromium in kiosk mode.
+# The API gateway serves the built React dashboard at localhost:8000.
+# Run via cage Wayland compositor: cage -- /path/to/kiosk-start.sh
 
 set -euo pipefail
 
-DASHBOARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT=5173
-URL="http://localhost:${PORT}"
+URL="http://localhost:8000"
 
-# ── 1. Start Vite dev server if not listening ──────────────────────────────────
-if ! ss -tlnp 2>/dev/null | grep -q ":${PORT}"; then
-  echo "[kiosk] Starting Vite dev server on port ${PORT}…"
-  cd "$DASHBOARD_DIR"
-  /usr/bin/npm run dev -- --port "$PORT" --host >/tmp/aurasense-vite.log 2>&1 &
-  # Wait up to 15 s for Vite to bind
-  for i in $(seq 1 30); do
-    ss -tlnp 2>/dev/null | grep -q ":${PORT}" && break
+# ── 1. Wait for API gateway (up to 60 s) ──────────────────────────────────────
+echo "[kiosk] Waiting for API gateway at $URL …"
+for i in $(seq 1 120); do
+    curl -sf "$URL/health" >/dev/null 2>&1 && break
     sleep 0.5
-  done
-fi
+done
+echo "[kiosk] API gateway ready."
 
-# ── 2. Locate Chromium binary (prefer snap, avoid shell wrappers) ──────────────
-if [ -x /snap/bin/chromium ]; then
-  BROWSER=/snap/bin/chromium
-elif [ -x /usr/bin/google-chrome-stable ]; then
-  BROWSER=/usr/bin/google-chrome-stable
-elif [ -x /usr/bin/google-chrome ]; then
-  BROWSER=/usr/bin/google-chrome
+# ── 2. Locate Chromium binary ──────────────────────────────────────────────────
+if   [ -x /usr/bin/chromium-browser ];     then BROWSER=/usr/bin/chromium-browser
+elif [ -x /usr/bin/chromium ];             then BROWSER=/usr/bin/chromium
+elif [ -x /usr/bin/google-chrome-stable ]; then BROWSER=/usr/bin/google-chrome-stable
+elif [ -x /usr/bin/google-chrome ];        then BROWSER=/usr/bin/google-chrome
+elif [ -x /snap/bin/chromium ];            then BROWSER=/snap/bin/chromium
 else
-  echo "[kiosk] ERROR: No Chromium or Google Chrome binary found." >&2
-  echo "[kiosk] Install with: snap install chromium" >&2
-  exit 1
+    echo "[kiosk] ERROR: No Chromium or Google Chrome binary found." >&2
+    exit 1
 fi
 
 echo "[kiosk] Launching: $BROWSER --kiosk $URL"
 
 # ── 3. Launch kiosk (Wayland-native via ozone) ────────────────────────────────
 exec "$BROWSER" \
-  --kiosk \
-  --ozone-platform=wayland \
-  --enable-features=UseOzonePlatform \
-  --noerrdialogs \
-  --no-first-run \
-  --disable-infobars \
-  --disable-translate \
-  --disable-features=TranslateUI,OverscrollHistoryNavigation,VaapiVideoDecoder \
-  --disable-session-crashed-bubble \
-  --disable-restore-session-state \
-  --disable-pinch \
-  --check-for-update-interval=31536000 \
-  --window-position=0,0 \
-  "$URL"
+    --kiosk \
+    --ozone-platform=wayland \
+    --enable-features=UseOzonePlatform \
+    --noerrdialogs \
+    --no-first-run \
+    --disable-infobars \
+    --disable-translate \
+    --disable-features=TranslateUI,OverscrollHistoryNavigation,VaapiVideoDecoder \
+    --disable-session-crashed-bubble \
+    --disable-restore-session-state \
+    --disable-pinch \
+    --check-for-update-interval=31536000 \
+    --window-position=0,0 \
+    "$URL"

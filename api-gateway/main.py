@@ -22,6 +22,7 @@ GET   /health                       Liveness probe (no auth)
 
 import asyncio
 import logging
+import os
 import signal
 import subprocess
 import threading
@@ -31,6 +32,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 import auth
@@ -231,6 +233,13 @@ app.include_router(clips.router)
 app.include_router(status_route.router)
 app.include_router(discovery.router)
 app.include_router(storage.router)
+
+# ── Dashboard static files ────────────────────────────────────────────────────
+# Serve the built React dashboard from the same port as the API.
+# Must be mounted last so API routes take priority over the catch-all.
+_dist = os.path.join(os.path.dirname(__file__), "..", "dashboard", "dist")
+if os.path.isdir(_dist):
+    app.mount("/", StaticFiles(directory=_dist, html=True), name="dashboard")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
