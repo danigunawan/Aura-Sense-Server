@@ -38,6 +38,7 @@ recordings/
 .env
 *.local
 local.properties
+deploy/.config
 
 # Claude
 .claude/settings.local.json
