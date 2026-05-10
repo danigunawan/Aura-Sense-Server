@@ -16,9 +16,15 @@ from database import CameraDB
 from models import Camera, make_slug
 import mediamtx_sync
 import onvif_client
+import subnet_scan
 import wsdiscovery
 
 log = logging.getLogger(__name__)
+
+
+def _is_link_local(ip: str) -> bool:
+    """RFC 3927 IPv4 link-local — 169.254.0.0/16."""
+    return bool(ip) and ip.startswith("169.254.")
 
 
 class DiscoveryService:
@@ -81,8 +87,23 @@ class DiscoveryService:
         )
 
     async def _run_cycle(self) -> int:
-        log.info("Starting WS-Discovery scan…")
-        devices = await wsdiscovery.scan(timeout=self._cfg.discovery_timeout)
+        log.info("Starting discovery cycle (WS-Discovery + subnet sweep)…")
+
+        # Run multicast WSD and subnet sweep concurrently.
+        wsd_task   = wsdiscovery.scan(timeout=self._cfg.discovery_timeout)
+        sweep_task = subnet_scan.scan(timeout=self._cfg.discovery_timeout)
+        wsd_results, sweep_results = await asyncio.gather(wsd_task, sweep_task)
+
+        # Dedupe by IP — WSD result wins (it carries proper endpoint UUID).
+        by_ip = {d.ip_address: d for d in sweep_results}
+        for d in wsd_results:
+            by_ip[d.ip_address] = d
+        devices = list(by_ip.values())
+
+        log.info(
+            "Discovery cycle: WSD=%d sweep=%d merged=%d",
+            len(wsd_results), len(sweep_results), len(devices),
+        )
 
         if not devices:
             log.info("No ONVIF devices found on the network")
@@ -152,6 +173,15 @@ class DiscoveryService:
         name = await self._assign_name(info.device_uuid)
         slug = await self._assign_slug(info.device_uuid, name)
 
+        # Snapshot the prior row before upsert overwrites ip_address — we need
+        # the camera's last-known good IP to recover it from link-local fallback.
+        prior = await self._db.get_by_uuid(info.device_uuid)
+        prior_good_ip = (
+            prior.ip_address
+            if prior and prior.ip_address and not _is_link_local(prior.ip_address)
+            else None
+        )
+
         camera = Camera(
             device_uuid       = info.device_uuid,
             ip_address        = device.ip_address,
@@ -186,8 +216,14 @@ class DiscoveryService:
         else:
             log.info("Updated existing camera '%s' @ %s", name, host)
 
-        # Assign static IP to newly discovered cameras (if enabled).
-        if is_new and self._cfg.static_ip_enabled:
+        # Camera fell back to IPv4 link-local — push its previously-known IP
+        # back via ONVIF so mediamtx (which only routes to the camera subnet)
+        # can reach it again. Camera reboots; the next cycle picks it up at
+        # the recovered address.
+        if _is_link_local(host) and prior_good_ip:
+            await self._reassert_ip(camera, host, prior_good_ip)
+        # New camera with no prior IP — fall through to the pool flow if it's enabled.
+        elif is_new and self._cfg.static_ip_enabled:
             await self._assign_static_ip(camera, host)
 
         # Hot-add paths to running mediamtx (non-blocking, failures tolerated).
@@ -200,6 +236,49 @@ class DiscoveryService:
         )
 
         return is_new
+
+    async def _reassert_ip(self, camera: Camera, current_host: str, target_ip: str) -> None:
+        """
+        Push `target_ip` back onto a camera that's currently on a link-local
+        address. Uses the camera's last-known prior IP — stable across the
+        rest of the system (same slug, same recording history).
+        """
+        cfg = self._cfg
+        # Gateway defaults to this host's camera-NIC IP (DISCOVERY_INTERFACE)
+        # when the static-IP pool config isn't explicitly set for this deploy.
+        import os as _os
+        gateway = cfg.static_ip_gateway
+        if gateway == '192.168.1.1':  # unconfigured default
+            gateway = _os.getenv('DISCOVERY_INTERFACE', '').strip() or gateway
+
+        log.info(
+            "Re-asserting prior IP %s on camera '%s' (currently link-local %s, gw=%s)",
+            target_ip, camera.name, current_host, gateway,
+        )
+        try:
+            await onvif_client.set_static_ip(
+                host       = current_host,
+                port       = camera.port,
+                username   = cfg.onvif_user,
+                password   = cfg.onvif_pass,
+                static_ip  = target_ip,
+                prefix_len = cfg.static_ip_prefix,
+                gateway    = gateway,
+                dns        = cfg.static_ip_dns,
+                timeout    = cfg.onvif_timeout,
+            )
+            await self._db.update_static_ip(camera.device_uuid, target_ip)
+            await self._db.log_event(
+                'static_ip_reasserted',
+                f"Re-asserted {target_ip} on '{camera.name}' (was on link-local {current_host})",
+                camera_uuid = camera.device_uuid,
+                ip_address  = current_host,
+            )
+        except Exception as exc:
+            log.error(
+                "Failed to re-assert IP %s on camera '%s' @ %s: %s",
+                target_ip, camera.name, current_host, exc,
+            )
 
     async def _assign_name(self, device_uuid: str) -> str:
         existing = await self._db.get_by_uuid(device_uuid)

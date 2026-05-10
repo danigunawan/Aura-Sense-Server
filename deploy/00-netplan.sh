@@ -24,6 +24,11 @@ network:
       dhcp4: false
       addresses:
         - $CAMERA_NIC_IP/$(echo "$CAMERA_SUBNET" | cut -d'/' -f2)
+      # IPv4 link-local fallback: ensures the host has a 169.254/16 route via
+      # this NIC so discovery can reach cameras that lost their DHCP lease and
+      # fell back to 169.254.x.x. Without this, link-local packets leave via
+      # the internet NIC and never reach the camera segment.
+      link-local: [ipv4]
 YAML
 
 chmod 600 "$NETPLAN_FILE"
