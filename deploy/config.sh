@@ -45,11 +45,11 @@ echo "  Camera NIC:   $CAM_NIC"
 
 # ── Auto-detect recording HDD ─────────────────────────────────────────────────
 echo ""
-echo "Detecting recording HDD (>=3 TB, not the OS disk)..."
+echo "Detecting recording HDD (any non-OS disk)..."
 BOOT_DISK=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null \
     | head -1 || echo "sda")
-REC_DISK=$(lsblk -dno NAME,SIZE,TYPE \
-    | awk '$3=="disk" && ($2 ~ /[3-9][0-9]*(\.[0-9]+)?T/ || $2 ~ /[0-9]{4,}G/)' \
+REC_DISK=$(lsblk -dno NAME,TYPE \
+    | awk '$2=="disk"' \
     | grep -v "^$BOOT_DISK " \
     | head -1 | awk '{print "/dev/"$1}')
 if [[ -z "$REC_DISK" ]]; then

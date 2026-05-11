@@ -23,6 +23,14 @@ fi
 # ── Stop recording service if running ─────────────────────────────────────────
 systemctl stop aurasense-recording.service 2>/dev/null || true
 
+# ── Unmount any existing partitions on this disk ──────────────────────────────
+# Re-running 04 on a previously-formatted disk would otherwise fail with
+# "Partition(s) on $REC_DISK are being used."
+for mp in $(lsblk -nro MOUNTPOINT "$REC_DISK" | grep -v '^$'); do
+    echo "[04-hdd-setup] Unmounting $mp..."
+    umount "$mp" || { echo "ERROR: umount $mp failed (in use). lsof +f -- $mp"; exit 1; }
+done
+
 # ── Partition ─────────────────────────────────────────────────────────────────
 echo "[04-hdd-setup] Partitioning $REC_DISK..."
 parted "$REC_DISK" --script mklabel gpt

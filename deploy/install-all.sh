@@ -41,10 +41,11 @@ fi
 # ── Phase runner ─────────────────────────────────────────────────────────────
 PHASES=(
     "00-netplan.sh    | Dual-NIC network configuration"
-    "01-calibrate.sh  | System calibration (microcode, governor, tuning) — REBOOTS"
+    "00b-camera-dhcp.sh | DHCP server for camera NIC (dnsmasq)"
+    "01-calibrate.sh  | System calibration (governor, sysctl, ulimits, NTP) — no reboot"
     "02-prerequisites.sh | Install Python 3.11, Node.js 20, Redis, cage, Chromium"
     "03-deploy.sh     | Clone repo, build venvs, configure .env, install services"
-    "04-hdd-setup.sh  | Format + mount 4 TB recording HDD"
+    "04-hdd-setup.sh  | Format + mount recording HDD"
     "05-kiosk.sh      | Configure TTY1 autologin + cage kiosk service"
     "06-firewall.sh   | UFW firewall rules"
     "07-cloudflare.sh | Cloudflare tunnel setup"
@@ -75,18 +76,6 @@ for entry in "${PHASES[@]}"; do
         echo "ERROR: $SCRIPT failed with exit code $EXIT_CODE."
         read -rp "Continue anyway? [y/N]: " CONT
         [[ "${CONT,,}" == "y" ]] || exit 1
-    fi
-
-    # 01-calibrate.sh reboots the machine — pause here and tell user to re-run
-    if [[ "$SCRIPT" == "01-calibrate.sh" ]]; then
-        echo ""
-        echo "=========================================="
-        echo "  System is rebooting for microcode update."
-        echo "  SSH back in and re-run this script."
-        echo "  The script will skip already-run phases"
-        echo "  if you press S to skip phase 01."
-        echo "=========================================="
-        exit 0
     fi
 done
 

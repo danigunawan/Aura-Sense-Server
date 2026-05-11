@@ -1,29 +1,37 @@
 #!/usr/bin/env bash
-# Phase 01 — System calibration
-# Intel microcode, governor, disable sleep, kernel tuning, ulimits, NTP, auto-updates.
-# Ends with a reboot (required for microcode).
+# Phase 01 — System calibration (no reboot, no session kick)
+#
+# Only what AuraSense actually needs to run reliably:
+#   • Disable sleep / suspend / hibernate (server must never sleep)
+#   • CPU performance governor
+#   • Sysctl tuning (file descriptors, network buffers, dirty-page flush)
+#   • ulimits for the aura user
+#   • mq-deadline I/O scheduler for spinning disks
+#   • Chrony for accurate recording timestamps
+#   • Disable bluetooth / avahi / cups / ModemManager
+#
+# Idempotent: safe to re-run.
 
 set -euo pipefail
+SENTINEL="/var/lib/aurasense-calibrated"
 
-echo "[01-calibrate] Starting system calibration..."
+echo "[01-calibrate] Starting AuraSense system calibration (no reboot)..."
 
-# ── Update + Intel microcode ───────────────────────────────────────────────────
-echo "[01-calibrate] Updating packages + installing Intel microcode..."
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq intel-microcode iucode-tool
-update-grub -q
 
-# ── Disable unnecessary services ──────────────────────────────────────────────
+# ── Disable services that aren't needed on a headless NVR ─────────────────────
 echo "[01-calibrate] Disabling unnecessary services..."
 for svc in bluetooth avahi-daemon ModemManager cups cups-browsed; do
     systemctl disable --now "$svc" 2>/dev/null || true
 done
 
 # ── Mask sleep targets ────────────────────────────────────────────────────────
+echo "[01-calibrate] Masking sleep / suspend / hibernate targets..."
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 
-# ── Prevent logind from suspending ────────────────────────────────────────────
+# ── Prevent logind from suspending on lid-close / idle ────────────────────────
+# Drop-in is picked up on next login/reboot — we deliberately do NOT restart
+# systemd-logind here, because that kicks the current TTY/SSH session.
 mkdir -p /etc/systemd/logind.conf.d
 cat > /etc/systemd/logind.conf.d/aurasense.conf << 'CONF'
 [Login]
@@ -32,13 +40,6 @@ HandleLidSwitch=ignore
 HandleLidSwitchDocked=ignore
 IdleAction=ignore
 CONF
-systemctl restart systemd-logind
-
-# ── Purge snapd ───────────────────────────────────────────────────────────────
-echo "[01-calibrate] Removing snapd..."
-DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq snapd 2>/dev/null || true
-apt-mark hold snapd 2>/dev/null || true
-rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd
 
 # ── CPU performance governor ───────────────────────────────────────────────────
 echo "[01-calibrate] Setting CPU governor to performance..."
@@ -46,13 +47,11 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cpufrequtils
 echo 'GOVERNOR="performance"' > /etc/default/cpufrequtils
 systemctl enable --now cpufrequtils
 
-# ── Kernel tuning ─────────────────────────────────────────────────────────────
+# ── Kernel tuning (sysctl — takes effect immediately) ─────────────────────────
 echo "[01-calibrate] Writing kernel parameters..."
 cat > /etc/sysctl.d/99-aurasense.conf << 'SYSCTL'
 # File descriptors (32 cameras x many FFmpeg fds)
 fs.file-max = 524288
-fs.inotify.max_user_watches = 524288
-fs.inotify.max_user_instances = 512
 
 # Network buffers for RTSP/HLS with many streams
 net.core.rmem_max = 16777216
@@ -72,7 +71,7 @@ vm.dirty_writeback_centisecs = 500
 SYSCTL
 sysctl --system -q
 
-# ── ulimits for aura user ──────────────────────────────────────────────────────
+# ── ulimits for aura user ─────────────────────────────────────────────────────
 cat > /etc/security/limits.d/aura-nvr.conf << 'LIMITS'
 aura soft nofile 65536
 aura hard nofile 131072
@@ -88,34 +87,14 @@ ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="1", ATTR{queue
 UDEV
 udevadm control --reload-rules && udevadm trigger
 
-# ── noatime on all ext4 mounts ────────────────────────────────────────────────
-echo "[01-calibrate] Adding noatime to fstab ext4 entries..."
-# Only add noatime if not already present
-sed -i '/ext4/ { /noatime/! s/defaults/defaults,noatime/ }' /etc/fstab
-mount -o remount,noatime / 2>/dev/null || true
-mount -o remount,noatime /var 2>/dev/null || true
-mount -o remount,noatime /home 2>/dev/null || true
-
 # ── NTP ───────────────────────────────────────────────────────────────────────
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq chrony
 systemctl enable --now chrony
 
-# ── Unattended security upgrades (no auto-reboot) ─────────────────────────────
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades
-# Configure: security updates only, no auto-reboot
-cat > /etc/apt/apt.conf.d/52aurasense-upgrades << 'APT'
-Unattended-Upgrade::Allowed-Origins {
-    "${distro_id}:${distro_codename}-security";
-};
-Unattended-Upgrade::AutoFixInterruptedDpkg "true";
-Unattended-Upgrade::MinimalSteps "true";
-Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
-Unattended-Upgrade::Remove-Unused-Dependencies "false";
-Unattended-Upgrade::Automatic-Reboot "false";
-APT
-systemctl enable --now unattended-upgrades
+# ── Mark calibrated ───────────────────────────────────────────────────────────
+mkdir -p "$(dirname "$SENTINEL")"
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SENTINEL"
 
 echo ""
-echo "[01-calibrate] Done. Rebooting in 5 seconds to apply microcode + governor..."
-sleep 5
-reboot
+echo "[01-calibrate] Done — no reboot required."
+echo "[01-calibrate] Continue with phase 02 (prerequisites)."

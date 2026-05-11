@@ -82,18 +82,18 @@ The script will prompt for **4 values** at the start — everything else is auto
 | Phase | Script | Notes |
 |---|---|---|
 | 00 | `00-netplan.sh` | Dual-NIC static IP + prevents boot stall if camera cable unplugged |
-| 01 | `01-calibrate.sh` | Microcode, CPU governor, kernel tuning, disable sleep — **reboots** |
+| 01 | `01-calibrate.sh` | CPU governor, kernel tuning, disable sleep, NTP — **no reboot** |
 | 02 | `02-prerequisites.sh` | Python 3.11, Node.js 20, Redis, FFmpeg, Chromium, cage |
 | 03 | `03-deploy.sh` | Venvs, npm install, dashboard build, `.env`, systemd services |
-| 04 | `04-hdd-setup.sh` | Partition + format 4 TB HDD, mount with `nofail` fstab entry |
+| 04 | `04-hdd-setup.sh` | Partition + format recording HDD, mount with `nofail` fstab entry |
 | 05 | `05-kiosk.sh` | TTY1 autologin + cage Wayland kiosk service |
 | 06 | `06-firewall.sh` | UFW — RTSP locked to camera NIC, API/HLS/WebRTC open |
 | 07 | `07-cloudflare.sh` | cloudflared tunnel, DNS routes, systemd service |
 | 08 | `08-verify.sh` | Full health check with pass/fail report |
 
-> **Phase 01 reboots the machine.** SSH back in and re-run `install-all.sh`. Press **S** to skip phase 01 and continue from phase 02.
+> Phase 01 deliberately does **not** run `apt full-upgrade`, install `intel-microcode`, or touch grub. Those changes were the cause of the boot loop on older hardware and are not required for AuraSense to run. The OS is calibrated in-place with no reboot.
 
-Each phase can be skipped individually by pressing **S** when prompted.
+Each phase can be skipped individually by pressing **N** when prompted.
 
 ---
 

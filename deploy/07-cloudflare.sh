@@ -56,9 +56,11 @@ fi
 echo "[07-cloudflare] Tunnel ID: $TUNNEL_ID"
 
 # ── DNS routes ────────────────────────────────────────────────────────────────
+# --overwrite-dns lets re-runs replace existing records (e.g. left over from
+# a prior aborted install with a different CF_DOMAIN).
 echo "[07-cloudflare] Creating DNS routes..."
-cloudflared tunnel route dns "$TUNNEL_NAME" "api.$CF_DOMAIN"
-cloudflared tunnel route dns "$TUNNEL_NAME" "stream.$CF_DOMAIN"
+cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "api.$CF_DOMAIN"
+cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "stream.$CF_DOMAIN"
 echo "  api.$CF_DOMAIN    → API gateway (port 8000)"
 echo "  stream.$CF_DOMAIN → HLS streaming (port 8888)"
 
@@ -80,6 +82,14 @@ YAML
 echo "[07-cloudflare] Config written to /etc/cloudflared/config.yml"
 
 # ── Install and start systemd service ─────────────────────────────────────────
+# Remove any prior install so re-runs don't fail with
+# "cloudflared service is already installed".
+systemctl stop cloudflared 2>/dev/null || true
+systemctl disable cloudflared 2>/dev/null || true
+cloudflared service uninstall 2>/dev/null || true
+rm -f /etc/systemd/system/cloudflared.service
+rm -f /etc/systemd/system/multi-user.target.wants/cloudflared.service
+systemctl daemon-reload
 cloudflared service install
 systemctl enable --now cloudflared
 

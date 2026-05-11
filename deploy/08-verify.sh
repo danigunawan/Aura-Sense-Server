@@ -9,8 +9,8 @@ source "$DEPLOY_DIR/config.sh"
 PASS=0
 FAIL=0
 
-ok()   { echo "  [OK]   $1"; ((PASS++)); }
-fail() { echo "  [FAIL] $1"; ((FAIL++)); }
+ok()   { echo "  [OK]   $1"; PASS=$((PASS+1)); }
+fail() { echo "  [FAIL] $1"; FAIL=$((FAIL+1)); }
 warn() { echo "  [WARN] $1"; }
 
 echo ""

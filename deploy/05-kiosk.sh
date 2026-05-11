@@ -18,7 +18,6 @@ CONF
 
 # ── Ensure XDG_RUNTIME_DIR is created on autologin ───────────────────────────
 # cage needs /run/user/1000 to exist (normally created by systemd-logind on login)
-mkdir -p /etc/systemd/system/create-xdg-runtime.service
 cat > /etc/systemd/system/create-xdg-runtime.service << 'SVC'
 [Unit]
 Description=Create XDG_RUNTIME_DIR for aura kiosk session
@@ -65,6 +64,44 @@ SVC
 
 # ── Make kiosk-start.sh executable ───────────────────────────────────────────
 chmod +x "$PROJECT_DIR/dashboard/kiosk-start.sh"
+
+# ── Disable GNOME screen blanking / lock (system-wide dconf default) ─────────
+# cage doesn't blank, but if a tech ever logs in graphically the kiosk gets
+# attached to GNOME's wayland-0 — and GNOME blanks at 5 min and locks. Setting
+# system-wide dconf defaults protects every user profile, present or future.
+echo "[05-kiosk] Installing dconf defaults to disable screen blanking/lock..."
+mkdir -p /etc/dconf/profile /etc/dconf/db/local.d
+if [ ! -f /etc/dconf/profile/user ]; then
+    cat > /etc/dconf/profile/user << 'PROFILE'
+user-db:user
+system-db:local
+PROFILE
+fi
+cat > /etc/dconf/db/local.d/00-aurasense-kiosk << 'DCONF'
+[org/gnome/desktop/session]
+idle-delay=uint32 0
+
+[org/gnome/desktop/screensaver]
+lock-enabled=false
+idle-activation-enabled=false
+
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+DCONF
+dconf update
+
+# Apply live to the aura session if it's already up (re-runs of this script)
+if [ -S /run/user/1000/bus ]; then
+    sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        gsettings set org.gnome.desktop.session idle-delay 0 || true
+    sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        gsettings set org.gnome.desktop.screensaver lock-enabled false || true
+    sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        gsettings set org.gnome.desktop.screensaver idle-activation-enabled false || true
+    sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' || true
+fi
 
 # ── Reload systemd ────────────────────────────────────────────────────────────
 systemctl daemon-reload

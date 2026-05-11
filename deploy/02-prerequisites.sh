@@ -22,8 +22,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
 # ── Core tools ────────────────────────────────────────────────────────────────
 echo "[02-prerequisites] Installing core packages..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    ffmpeg git curl wget sqlite3 \
-    build-essential python3-dev net-tools
+    ffmpeg git curl \
+    build-essential python3-dev
 
 # ── Redis ─────────────────────────────────────────────────────────────────────
 echo "[02-prerequisites] Installing + hardening Redis..."
@@ -35,12 +35,15 @@ systemctl enable --now redis-server
 redis-cli ping | grep -q PONG && echo "[02-prerequisites] Redis: OK"
 
 # ── Kiosk stack ───────────────────────────────────────────────────────────────
+# Minimum to run the dashboard fullscreen on the local monitor.
+# wlr-randr (screen rotation) and unclutter-xfixes (X11-only) are not needed.
 echo "[02-prerequisites] Installing kiosk stack (cage + Chromium)..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    cage wlr-randr \
+    cage \
     chromium-browser \
-    unclutter-xfixes \
-    dbus-user-session
+    dbus-user-session \
+    dconf-cli \
+    libglib2.0-bin
 
 # ── Verify ────────────────────────────────────────────────────────────────────
 echo ""
@@ -51,6 +54,6 @@ npm --version
 ffmpeg -version 2>&1 | head -1
 redis-cli ping
 cage --version 2>/dev/null || echo "cage installed"
-chromium-browser --version 2>/dev/null || echo "chromium-browser installed"
+chromium-browser --version 2>/dev/null || command -v chromium >/dev/null && echo "chromium installed"
 echo ""
 echo "[02-prerequisites] Done."
