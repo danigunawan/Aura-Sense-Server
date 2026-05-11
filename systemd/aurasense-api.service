@@ -5,7 +5,12 @@ Wants=network-online.target
 PartOf=aurasense.target
 
 [Service]
-Type=simple
+# Type=notify: main.py's lifespan calls `systemd-notify --ready` once db,
+# Redis, and routes are wired. NotifyAccess=all lets the subprocess send it
+# on uvicorn's behalf (default `main` rejects child PIDs).
+Type=notify
+NotifyAccess=all
+TimeoutStartSec=180
 User=aura
 WorkingDirectory=/home/aura/Documents/aurasense/api-gateway
 ExecStart=/home/aura/Documents/aurasense/api-gateway/.venv/bin/uvicorn \
@@ -13,7 +18,6 @@ ExecStart=/home/aura/Documents/aurasense/api-gateway/.venv/bin/uvicorn \
 
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=0
 
 TimeoutStopSec=10
 

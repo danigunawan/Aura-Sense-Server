@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI):
 
     await _ensure_default_admin()
 
+    # Signal systemd that we're fully ready (Type=notify). No-op outside
+    # systemd because systemd-notify exits 0 when NOTIFY_SOCKET is unset.
+    if os.environ.get("NOTIFY_SOCKET"):
+        subprocess.run(["systemd-notify", "--ready"], check=False)
+
     yield
 
     # Shutdown
