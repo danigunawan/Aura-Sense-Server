@@ -41,7 +41,7 @@ echo "[05-kiosk] Writing aurasense-kiosk.service (cage wrapper)..."
 cat > /etc/systemd/system/aurasense-kiosk.service << 'SVC'
 [Unit]
 Description=AuraSense NVR Kiosk (cage + Chromium)
-After=graphical.target aurasense-api.service create-xdg-runtime.service
+After=aurasense-api.service create-xdg-runtime.service
 Wants=graphical.target create-xdg-runtime.service
 PartOf=aurasense.target
 
@@ -88,8 +88,28 @@ idle-activation-enabled=false
 [org/gnome/settings-daemon/plugins/power]
 sleep-inactive-ac-type='nothing'
 sleep-inactive-battery-type='nothing'
+
+[org/gnome/desktop/media-handling]
+automount=false
+automount-open=false
+autorun-never=true
 DCONF
 dconf update
+
+# ── Polkit: let aura mount/unmount/eject without password ────────────────────
+# Plugging in a USB or unmounting a drive from the kiosk session triggers
+# udisks2 → polkit. For a disk with an ESP partition (e.g. a bootable installer
+# USB being repurposed for recording) udisks2 raises filesystem-mount-system,
+# which prompts for an admin password — unacceptable on a kiosk.
+echo "[05-kiosk] Installing polkit rule for aurasense storage actions..."
+cat > /etc/polkit-1/localauthority/50-local.d/50-aurasense-storage.pkla << 'PKLA'
+[aurasense storage actions for aura]
+Identity=unix-user:aura
+Action=org.freedesktop.udisks2.filesystem-mount;org.freedesktop.udisks2.filesystem-mount-system;org.freedesktop.udisks2.filesystem-unmount-others;org.freedesktop.udisks2.eject-media;org.freedesktop.udisks2.power-off-drive;org.freedesktop.udisks2.modify-device
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
 
 # Apply live to the aura session if it's already up (re-runs of this script)
 if [ -S /run/user/1000/bus ]; then
@@ -101,6 +121,10 @@ if [ -S /run/user/1000/bus ]; then
         gsettings set org.gnome.desktop.screensaver idle-activation-enabled false || true
     sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
         gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' || true
+    sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        gsettings set org.gnome.desktop.media-handling automount false || true
+    sudo -u aura DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+        gsettings set org.gnome.desktop.media-handling automount-open false || true
 fi
 
 # ── Reload systemd ────────────────────────────────────────────────────────────

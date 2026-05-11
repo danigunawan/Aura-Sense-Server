@@ -4,8 +4,7 @@ After=network-online.target
 Wants=network-online.target \
       aurasense-mediamtx.service \
       aurasense-api.service \
-      aurasense-entrance-encoder.service \
-      aurasense-lobby-encoder.service \
+      aurasense-discovery.service \
       aurasense-recording.service \
       aurasense-watchdog.service
 

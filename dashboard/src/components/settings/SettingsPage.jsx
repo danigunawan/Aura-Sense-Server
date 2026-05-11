@@ -481,28 +481,46 @@ function UsersSection() {
 // ── Storage / HDD ─────────────────────────────────────────────────────────────
 
 function StorageSection() {
-  const [info,        setInfo]        = useState(null);
+  const [info,        setInfo]        = useState(null);   // /storage/hdd (active mount usage)
+  const [devices,     setDevices]     = useState(null);   // /storage/devices
+  const [recStatus,   setRecStatus]   = useState(null);   // /storage/recording-status
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  // Format confirm flow
-  const [confirmStep,  setConfirmStep]  = useState(0);    // 0=idle 1=modal 2=typing 3=running
-  const [confirmInput, setConfirmInput] = useState('');
-  const [formatError,  setFormatError]  = useState('');
+  // Format confirm flow — target is the device path being formatted.
+  const [confirmTarget, setConfirmTarget] = useState(null);
+  const [confirmStep,   setConfirmStep]   = useState(0);  // 0=closed 1=typing 2=running
+  const [confirmInput,  setConfirmInput]  = useState('');
+  const [formatError,   setFormatError]   = useState('');
   const confirmRef = useRef(null);
 
   const load = useCallback(() => {
-    api.hddStatus()
-      .then(d => { setInfo(d); setLoading(false); setLastUpdated(new Date()); setError(''); })
-      .catch(e => { setError(e.message); setLoading(false); });
+    Promise.allSettled([
+      api.hddStatus(),
+      api.listStorageDevices(),
+      api.recordingStatus(),
+    ]).then(([hddRes, devRes, recRes]) => {
+      setInfo(hddRes.status === 'fulfilled' ? hddRes.value : null);
+      setDevices(devRes.status === 'fulfilled' ? devRes.value : null);
+      setRecStatus(recRes.status === 'fulfilled' ? recRes.value : null);
+      // Only surface a top-level error if device enumeration itself failed —
+      // /storage/hdd legitimately 503s when no disk is mounted.
+      if (devRes.status === 'rejected') {
+        setError(devRes.reason?.message || 'Could not enumerate drives');
+      } else {
+        setError('');
+      }
+      setLoading(false);
+      setLastUpdated(new Date());
+    });
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  // Refresh every 30 s while the tab is open
+  // Refresh every 15 s — recording-status mtimes are the main thing we want fresh.
   useEffect(() => {
-    const id = setInterval(load, 30_000);
+    const id = setInterval(load, 15_000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -514,16 +532,27 @@ function StorageSection() {
     }
   }, [confirmStep]);
 
+  function openConfirm(devicePath) {
+    setConfirmTarget(devicePath);
+    setConfirmStep(1);
+  }
+  function closeConfirm() {
+    if (confirmStep === 2) return;  // don't close mid-format
+    setConfirmStep(0);
+    setConfirmTarget(null);
+  }
+
   async function handleFormat() {
     if (confirmInput !== 'FORMAT') {
       setFormatError('Type FORMAT (all caps) to confirm');
       return;
     }
-    setConfirmStep(3);
+    setConfirmStep(2);
     setFormatError('');
     try {
-      await api.formatHdd();
+      await api.formatHdd(confirmTarget);
       setConfirmStep(0);
+      setConfirmTarget(null);
       setLoading(true);
       setTimeout(load, 3000);   // give recording service time to restart
     } catch (e) {
@@ -532,162 +561,104 @@ function StorageSection() {
     }
   }
 
-  const usePct    = info?.use_percent ?? 0;
-  const recGB     = _gb(info?.recordings_bytes ?? 0);
-  const usedGB    = _gb(info?.used_bytes ?? 0);
-  const freeGB    = _gb(info?.free_bytes ?? 0);
-  const totalGB   = _gb(info?.total_bytes ?? 0);
-  const capGB     = _gb(info?.disk_cap_bytes ?? 0);
-  const estDays   = info?.estimated_days;
-
-  // Bar colour: green → amber → red as usage rises
-  const barColor = usePct > 90 ? 'var(--red)'
-                 : usePct > 75 ? 'var(--orange)'
-                 : 'var(--accent)';
+  const targetDevice = devices?.devices?.find(d => d.path === confirmTarget) || null;
 
   return (
     <div>
       <SectionHeader
-        title="Recording Drive"
-        subtitle="External HDD status and storage management for recorded footage"
+        title="Recording Storage"
+        subtitle="Connected drives, format setup, and live recording health"
       />
 
-      {error && !info && (
-        <div style={{
-          padding: '14px 16px', borderRadius: 8,
-          background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.25)',
-          fontSize: 13, color: 'var(--red)',
-        }}>
-          {error === 'Recording disk not mounted at /media/aura/recordaura'
-            ? 'Recording drive not connected. Attach the USB/SATA drive and refresh.'
-            : error}
-        </div>
-      )}
+      <RecordingStatusBanner rec={recStatus} loading={loading && !recStatus} />
 
-      {loading && !info && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-tertiary)', fontSize: 13 }}>
-          <Spinner size={14} /> Reading drive status…
-        </div>
-      )}
-
-      {info && (
-        <div style={{
-          padding: '20px 20px 16px',
-          borderRadius: 12,
-          background: 'var(--surface)',
-          border: '1px solid var(--border-mid)',
-        }}>
-          {/* Drive header row */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{
-                width: 38, height: 38, borderRadius: 8,
-                background: 'var(--surface-mid)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 20,
-              }}>
-                💾
-              </div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>Recording Drive</div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1, fontFamily: 'monospace' }}>
-                  {info.mount_point}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}>
-                {usedGB} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>/ {totalGB} GB</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                {freeGB} GB free
-              </div>
-            </div>
-          </div>
-
-          {/* Usage bar */}
-          <div style={{
-            height: 8, borderRadius: 4,
-            background: 'var(--surface-mid)',
-            overflow: 'hidden',
-            marginBottom: 16,
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${Math.min(usePct, 100)}%`,
-              borderRadius: 4,
-              background: barColor,
-              transition: 'width 0.6s var(--ease)',
-            }} />
-          </div>
-
-          {/* Stats row */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 12,
-            marginBottom: 18,
-          }}>
-            <StatCard label="Recordings" value={`${recGB} GB`} />
-            <StatCard label="NVR Cap" value={`${capGB} GB`} />
-            <StatCard
-              label="Est. Retention"
-              value={estDays != null ? `~${estDays} days` : 'calculating…'}
-              highlight={estDays != null && estDays < 2}
-            />
-          </div>
-
-          {/* Clip count + last updated */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            fontSize: 11, color: 'var(--text-tertiary)',
-          }}>
-            <span>{(info.clip_count ?? 0).toLocaleString()} segments indexed</span>
-            {lastUpdated && (
-              <button
-                onClick={load}
-                style={{ color: 'var(--accent)', fontSize: 11, padding: '2px 0' }}
-              >
-                Updated {_relTime(lastUpdated)} · Refresh
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Format button */}
       {info && (
         <div style={{ marginTop: 16 }}>
-          <Button danger onClick={() => setConfirmStep(1)}>
-            Format HDD…
-          </Button>
-          <p style={{
-            marginTop: 8, fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.6,
-          }}>
-            Erases all recordings and reinitialises the filesystem. This cannot be undone.
-          </p>
+          <ActiveDrivePanel info={info} onRefresh={load} lastUpdated={lastUpdated} />
         </div>
       )}
 
+      {error && (
+        <div style={{
+          marginTop: 16,
+          padding: '12px 14px', borderRadius: 8,
+          background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.25)',
+          fontSize: 12, color: 'var(--red)',
+        }}>
+          {error}
+        </div>
+      )}
+
+      {/* Connected drives */}
+      <div style={{ marginTop: 24 }}>
+        <div style={{
+          display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+          marginBottom: 10,
+        }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+            Connected Drives
+          </h3>
+          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+            The OS disk is hidden and cannot be formatted from here.
+          </span>
+        </div>
+
+        {loading && !devices && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-tertiary)', fontSize: 13 }}>
+            <Spinner size={14} /> Scanning attached drives…
+          </div>
+        )}
+
+        {devices && devices.devices.length === 0 && (
+          <EmptyState text="No external drives detected. Attach a USB or SATA drive and click refresh." />
+        )}
+
+        {devices && devices.devices.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {devices.devices.map(d => (
+              <DeviceRow key={d.path} device={d} onFormat={() => openConfirm(d.path)} />
+            ))}
+          </div>
+        )}
+
+        {devices && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+            <button
+              onClick={load}
+              style={{ color: 'var(--accent)', fontSize: 11, padding: '2px 0' }}
+            >
+              {lastUpdated ? `Updated ${_relTime(lastUpdated)} · Refresh` : 'Refresh'}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Format confirmation modal */}
-      {confirmStep >= 1 && (
-        <Modal onClose={() => { if (confirmStep !== 3) setConfirmStep(0); }}>
-          <div style={{ padding: '28px 28px 24px', width: 420 }}>
+      {confirmStep >= 1 && targetDevice && (
+        <Modal onClose={closeConfirm}>
+          <div style={{ padding: '28px 28px 24px', width: 460 }}>
             <div style={{ fontSize: 36, marginBottom: 14 }}>⚠</div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Format Recording Drive?</h3>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
+              Format {targetDevice.model || targetDevice.path}?
+            </h3>
             <p style={{
-              fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: 20,
+              fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: 16,
             }}>
-              This will permanently erase <strong>all {(info.clip_count ?? 0).toLocaleString()} recordings</strong> ({recGB} GB) and
-              reformat the drive. The recording service will restart automatically.<br /><br />
+              The entire disk <strong style={{ fontFamily: 'monospace' }}>{targetDevice.path}</strong>{' '}
+              ({_humanSize(targetDevice.size_bytes)}) will be repartitioned and
+              reformatted as ext4, then mounted at{' '}
+              <strong style={{ fontFamily: 'monospace' }}>{devices?.recording_mount}</strong> for recording.
+              {targetDevice.is_recording_disk && info && (
+                <> All <strong>{(info.clip_count ?? 0).toLocaleString()} existing recordings</strong> ({_gb(info.recordings_bytes)} GB) on this drive will be erased.</>
+              )}
+              <br /><br />
               <strong>This cannot be undone.</strong>
             </p>
 
-            {confirmStep === 3 ? (
+            {confirmStep === 2 ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: 13 }}>
                 <Spinner size={16} />
-                Formatting drive… do not disconnect the drive.
+                Formatting drive… do not disconnect.
               </div>
             ) : (
               <>
@@ -716,7 +687,7 @@ function StorageSection() {
                   <p style={{ fontSize: 11, color: 'var(--red)', marginBottom: 12 }}>{formatError}</p>
                 )}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <Button onClick={() => setConfirmStep(0)}>Cancel</Button>
+                  <Button onClick={closeConfirm}>Cancel</Button>
                   <Button danger onClick={handleFormat} disabled={confirmInput !== 'FORMAT'}>
                     Erase and Format
                   </Button>
@@ -728,6 +699,258 @@ function StorageSection() {
       )}
     </div>
   );
+}
+
+// ── Recording status banner ───────────────────────────────────────────────────
+
+function RecordingStatusBanner({ rec, loading }) {
+  let color, dot, title, detail;
+
+  if (loading) {
+    color = 'var(--text-tertiary)';
+    dot   = 'var(--text-tertiary)';
+    title = 'Checking recording status…';
+    detail = '';
+  } else if (!rec || !rec.mount_healthy) {
+    color  = 'var(--red)';
+    dot    = 'var(--red)';
+    title  = 'Not recording — no drive mounted';
+    detail = 'Attach a recording drive and format it from the list below.';
+  } else if (rec.is_recording) {
+    const activeCams = rec.cameras.filter(c => c.active).length;
+    color  = 'var(--green, #34c759)';
+    dot    = 'var(--green, #34c759)';
+    title  = `Recording — last write ${_relSecs(rec.seconds_since_last_write)}`;
+    detail = activeCams === rec.cameras.length
+      ? `All ${activeCams} camera${activeCams === 1 ? '' : 's'} writing segments.`
+      : `${activeCams} of ${rec.cameras.length} cameras writing segments.`;
+  } else {
+    color  = 'var(--orange)';
+    dot    = 'var(--orange)';
+    title  = 'Not recording — no recent segment writes';
+    detail = rec.reason || `Last write ${_relSecs(rec.seconds_since_last_write)}.`;
+  }
+
+  return (
+    <div style={{
+      padding: '14px 16px', borderRadius: 10,
+      background: 'var(--surface)', border: '1px solid var(--border-mid)',
+      display: 'flex', alignItems: 'center', gap: 14,
+    }}>
+      <div style={{
+        width: 10, height: 10, borderRadius: '50%',
+        background: dot, boxShadow: `0 0 0 4px ${dot}22`,
+        flexShrink: 0,
+      }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color }}>{title}</div>
+        {detail && (
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{detail}</div>
+        )}
+      </div>
+
+      {rec && rec.cameras && rec.cameras.length > 0 && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 3,
+          fontSize: 11, color: 'var(--text-tertiary)', textAlign: 'right',
+          maxHeight: 64, overflow: 'auto',
+        }}>
+          {rec.cameras.map(c => (
+            <div key={c.slug} style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: c.active ? 'var(--green, #34c759)' : 'var(--text-tertiary)',
+              }} />
+              <span style={{ color: 'var(--text-secondary)' }}>{c.name}</span>
+              <span>· {_relSecs(c.seconds_since)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Active recording drive panel (kept from previous design) ──────────────────
+
+function ActiveDrivePanel({ info, onRefresh, lastUpdated }) {
+  const usePct  = info.use_percent ?? 0;
+  const recGB   = _gb(info.recordings_bytes ?? 0);
+  const usedGB  = _gb(info.used_bytes ?? 0);
+  const freeGB  = _gb(info.free_bytes ?? 0);
+  const totalGB = _gb(info.total_bytes ?? 0);
+  const capGB   = _gb(info.disk_cap_bytes ?? 0);
+  const estDays = info.estimated_days;
+
+  const barColor = usePct > 90 ? 'var(--red)'
+                 : usePct > 75 ? 'var(--orange)'
+                 : 'var(--accent)';
+
+  return (
+    <div style={{
+      padding: '20px 20px 16px',
+      borderRadius: 12,
+      background: 'var(--surface)',
+      border: '1px solid var(--border-mid)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 8,
+            background: 'var(--surface-mid)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 20,
+          }}>💾</div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Active Recording Drive</div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1, fontFamily: 'monospace' }}>
+              {info.mount_point}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}>
+            {usedGB} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>/ {totalGB} GB</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+            {freeGB} GB free
+          </div>
+        </div>
+      </div>
+
+      <div style={{
+        height: 8, borderRadius: 4,
+        background: 'var(--surface-mid)',
+        overflow: 'hidden',
+        marginBottom: 16,
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${Math.min(usePct, 100)}%`,
+          borderRadius: 4,
+          background: barColor,
+          transition: 'width 0.6s var(--ease)',
+        }} />
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: 12,
+        marginBottom: 18,
+      }}>
+        <StatCard label="Recordings" value={`${recGB} GB`} />
+        <StatCard label="NVR Cap" value={`${capGB} GB`} />
+        <StatCard
+          label="Est. Retention"
+          value={estDays != null ? `~${estDays} days` : 'calculating…'}
+          highlight={estDays != null && estDays < 2}
+        />
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        fontSize: 11, color: 'var(--text-tertiary)',
+      }}>
+        <span>{(info.clip_count ?? 0).toLocaleString()} segments indexed</span>
+        {lastUpdated && (
+          <button
+            onClick={onRefresh}
+            style={{ color: 'var(--accent)', fontSize: 11, padding: '2px 0' }}
+          >
+            Updated {_relTime(lastUpdated)} · Refresh
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Device row ────────────────────────────────────────────────────────────────
+
+function DeviceRow({ device, onFormat }) {
+  const status = _deviceStatus(device);
+  const title  = device.model
+    ? `${device.vendor ? device.vendor + ' ' : ''}${device.model}`
+    : device.path;
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      padding: '12px 14px',
+      borderRadius: 10,
+      background: 'var(--surface)',
+      border: '1px solid var(--border-mid)',
+    }}>
+      <div style={{
+        width: 34, height: 34, borderRadius: 8,
+        background: 'var(--surface-mid)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 18, flexShrink: 0,
+      }}>{device.rotational === false ? '⚡' : '💽'}</div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{title}</span>
+          <DeviceStatusBadge status={status} />
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: 2 }}>
+          {device.path} · {_humanSize(device.size_bytes)}
+          {device.transport && ` · ${device.transport.toUpperCase()}`}
+        </div>
+      </div>
+
+      <Button danger onClick={onFormat}>
+        {device.is_recording_disk ? 'Re-format…' : 'Format…'}
+      </Button>
+    </div>
+  );
+}
+
+function DeviceStatusBadge({ status }) {
+  const palette = {
+    recording: { bg: 'rgba(52,199,89,0.15)',  fg: 'var(--green, #34c759)', text: 'In use for recording' },
+    formatted: { bg: 'rgba(10,132,255,0.15)', fg: 'var(--accent)',         text: 'Has filesystem' },
+    mounted:   { bg: 'rgba(255,159,10,0.15)', fg: 'var(--orange)',         text: 'Mounted elsewhere' },
+    empty:     { bg: 'var(--surface-mid)',    fg: 'var(--text-secondary)', text: 'Unformatted · ready' },
+  }[status];
+
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 4,
+      fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+      background: palette.bg, color: palette.fg,
+    }}>
+      {palette.text}
+    </span>
+  );
+}
+
+function _deviceStatus(device) {
+  if (device.is_recording_disk) return 'recording';
+  const parts = device.partitions || [];
+  if (parts.length === 0) return 'empty';
+  if (parts.some(p => p.mountpoint)) return 'mounted';
+  return 'formatted';
+}
+
+function _humanSize(bytes) {
+  if (!bytes) return '—';
+  const tb = bytes / 1024 ** 4;
+  if (tb >= 1) return `${tb.toFixed(tb < 10 ? 2 : 1)} TB`;
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(gb < 10 ? 1 : 0)} GB`;
+  const mb = bytes / 1024 ** 2;
+  return `${mb.toFixed(0)} MB`;
+}
+
+function _relSecs(s) {
+  if (s == null) return 'never';
+  if (s < 5)    return 'just now';
+  if (s < 60)   return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
 }
 
 function StatCard({ label, value, highlight }) {

@@ -6,8 +6,10 @@ and indexed into the `clips` table.  This router is read-only on that table.
 
 Two access modes per clip:
   download_url — raw H.265 MP4, HMAC-signed, 1-hour TTL
-  play_url     — H.264 transcoded via FFmpeg (VAAPI → libx264 fallback),
-                 streamed as fragmented MP4; safe for kiosk/browser playback
+  play_url     — H.264 transcoded via FFmpeg (VAAPI h264_vaapi when the iGPU
+                 supports it, libx264 software otherwise), streamed as
+                 fragmented MP4 — plays in any modern browser including
+                 hardware that lacks H.265 decode (e.g. Haswell iGPU).
 """
 
 import asyncio
@@ -51,28 +53,39 @@ def _to_clip(row, camera_name: str) -> ClipResponse:
     )
 
 
-def _ffmpeg_webm_args(src_path: str) -> list[str]:
-    """Transcode any input to VP8/Vorbis WebM — royalty-free, plays in every
-    Chromium build including snap (no chromium-ffmpeg dependency).
-    Uses VAAPI VP8 encode when available, falls back to libvpx software."""
-    common_out = [
-        "-c:a", "libvorbis", "-b:a", "32k",
-        "-f", "webm",
-        "pipe:1",
+def _ffmpeg_mp4_args(src_path: str) -> list[str]:
+    """Transcode any input to H.264 / AAC fragmented MP4.
+
+    The recording service stores H.265, which Chrome cannot decode without
+    HEVC hardware support — so we always re-encode for playback. H.264 is
+    chosen over VP8 because every relevant Intel iGPU back to Haswell
+    hardware-encodes H.264, while VP8 encode requires Skylake+.
+
+    Input is decoded in software (Haswell has no HEVC HW decode); output is
+    HW-encoded via h264_vaapi when /dev/dri is accessible, libx264 otherwise.
+    """
+    common_audio = ["-c:a", "aac", "-b:a", "32k"]
+    common_out   = [
+        # Fragmented MP4 — playable progressively over a streaming response,
+        # no need for the moov atom at the end of the file.
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+        "-f", "mp4", "pipe:1",
     ]
     if os.access(_VAAPI_DEVICE, os.R_OK):
         return [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
-            "-hwaccel", "vaapi", "-hwaccel_device", _VAAPI_DEVICE,
-            "-hwaccel_output_format", "vaapi",
+            "-vaapi_device", _VAAPI_DEVICE,
             "-i", src_path,
-            "-c:v", "vp8_vaapi", "-b:v", "700k",
+            "-vf", "format=nv12,hwupload",
+            "-c:v", "h264_vaapi", "-b:v", "700k",
+            *common_audio,
             *common_out,
         ]
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
         "-i", src_path,
-        "-c:v", "libvpx", "-b:v", "700k", "-deadline", "realtime", "-cpu-used", "5",
+        "-c:v", "libx264", "-preset", "veryfast", "-b:v", "700k", "-pix_fmt", "yuv420p",
+        *common_audio,
         *common_out,
     ]
 
@@ -182,10 +195,10 @@ async def play_clip(
     db:      DB,
 ):
     """
-    Stream clip as VP8/Vorbis WebM for browser/kiosk playback.
-    WebM is royalty-free and plays in all Chromium builds (including snap)
-    without requiring chromium-ffmpeg or any proprietary codec.
-    Uses VAAPI VP8 encode when available, libvpx software otherwise.
+    Stream clip as H.264/AAC fragmented MP4 for browser/kiosk playback.
+    Source files are H.265 (camera sub-stream), which Chrome cannot decode
+    on hardware lacking HEVC support — so we always transcode here.
+    Uses VAAPI h264_vaapi when available, libx264 software otherwise.
     URL is pre-signed — no Authorization header needed.
     """
     if not auth.verify_clip_sig(clip_id, sig, exp):
@@ -216,7 +229,7 @@ async def play_clip(
             f"Clip is corrupt: {probe_err.decode(errors='replace').strip()[:120]}",
         )
 
-    args = _ffmpeg_webm_args(src_path)
+    args = _ffmpeg_mp4_args(src_path)
 
     async def _stream():
         proc = await asyncio.create_subprocess_exec(
@@ -237,6 +250,6 @@ async def play_clip(
 
     return StreamingResponse(
         _stream(),
-        media_type="video/webm",
+        media_type="video/mp4",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

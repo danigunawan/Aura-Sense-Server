@@ -16,7 +16,6 @@ TimeoutStopSec=30
 
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=0
 
 StandardOutput=journal
 StandardError=journal

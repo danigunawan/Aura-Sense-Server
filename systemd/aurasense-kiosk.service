@@ -1,6 +1,6 @@
 [Unit]
 Description=AuraSense NVR Kiosk (Chromium)
-After=graphical.target aurasense-api.service
+After=aurasense-api.service create-xdg-runtime.service
 Wants=graphical.target
 PartOf=aurasense.target
 
@@ -14,7 +14,6 @@ ExecStart=/home/aura/Documents/aurasense/dashboard/kiosk-start.sh
 
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=0
 TimeoutStopSec=10
 
 StandardOutput=journal

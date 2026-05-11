@@ -21,7 +21,7 @@ Mobile app next steps after receiving StreamResponse:
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from redis.asyncio import Redis
 
 import auth
@@ -41,7 +41,7 @@ def set_redis(r: Redis) -> None:
 
 
 @router.get("/{camera_id}/stream-urls", response_model=StreamUrlsResponse)
-async def get_stream_urls(camera_id: int, db: DB, _user: User):
+async def get_stream_urls(camera_id: int, db: DB, _user: User, request: Request):
     """
     Return the mediamtx WebRTC, HLS, and internal RTSP URLs for a camera.
     No session is created — these are permanent relay URLs from the proxy.
@@ -58,8 +58,18 @@ async def get_stream_urls(camera_id: int, db: DB, _user: User):
     # by discovery and stable across renames. Legacy rows that predate the
     # column fall back to a name-derived slug so they keep working.
     key = cam["slug"] or cam["name"].lower().replace(" ", "-")
-    base_webrtc = config.mediamtx_url.rstrip("/")
-    base_hls    = config.mediamtx_hls_url.rstrip("/")
+
+    # Kiosk callers (this same box, hitting localhost:8000) get direct
+    # localhost URLs so live view stays up when the cloudflared tunnel /
+    # internet are down. Remote callers (phone via api.<domain>) get the
+    # configured public URLs that route through cloudflared.
+    host = (request.url.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "::1"):
+        base_webrtc = "http://localhost:8889"
+        base_hls    = "http://localhost:8888"
+    else:
+        base_webrtc = config.mediamtx_url.rstrip("/")
+        base_hls    = config.mediamtx_hls_url.rstrip("/")
 
     ice_servers: list[dict] = [
         {"urls": ["stun:stun.l.google.com:19302"]},

@@ -1,4 +1,4 @@
-const BASE = '/api';
+const BASE = '';
 
 let _onUnauth = () => {};
 export function setUnauthHandler(fn) { _onUnauth = fn; }
@@ -77,8 +77,12 @@ export const api = {
     return request(`/cameras/${id}/clips?${q}`);
   },
 
-  hddStatus:     ()             => request('/storage/hdd'),
-  formatHdd:     ()             => request('/storage/format', { method: 'POST' }),
+  hddStatus:         ()         => request('/storage/hdd'),
+  listStorageDevices:()         => request('/storage/devices'),
+  recordingStatus:   ()         => request('/storage/recording-status'),
+  formatHdd:         (device)   => request('/storage/format', {
+    method: 'POST', body: JSON.stringify({ device }),
+  }),
 };
 
 export function snapshotUrl(cameraId) {

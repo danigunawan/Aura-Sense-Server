@@ -106,10 +106,11 @@ export default function RecordingsPage({ cameras }) {
         : Math.max(0, (targetEpoch - startInstant) / 1000);
 
       out[cam.id] = {
-        urls:        tail.map(c => c.download_url),
+        urls:        tail.map(c => c.play_url),
         startsMs:    tail.map(c => clamp(Date.parse(c.start_time) - midnightMs, 0, DAY_MS - 1)),
         startSeekS:  seekSec,
-        firstUrl:    tail[0].download_url,
+        firstUrl:    tail[0].play_url,
+        downloadUrl: tail[0].download_url,
       };
     }
     return out;
@@ -223,7 +224,7 @@ export default function RecordingsPage({ cameras }) {
     const q = queues[cam.id];
     if (!q) return;
     const a = document.createElement('a');
-    a.href = q.firstUrl;
+    a.href = q.downloadUrl;
     a.download = `aurasense_${(cam.name || `cam${cam.id}`).replace(/[^A-Za-z0-9_-]/g, '_')}.mp4`;
     document.body.appendChild(a); a.click(); a.remove();
   };

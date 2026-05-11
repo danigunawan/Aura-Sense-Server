@@ -21,24 +21,20 @@ hlsSegmentDuration: 1s
 hlsPartDuration:    200ms
 hlsSegmentMaxSize:  50MB
 
-webrtcICEServers2:
-  - url: stun:stun.l.google.com:19302
-  - url: stun:stun1.l.google.com:19302
-
 paths:
   entrance:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.86:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
     rtspTransport: tcp
     sourceOnDemand: false
   entrance-sub:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.177:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.86:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
     rtspTransport: tcp
     sourceOnDemand: false
   parking:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.210:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
     rtspTransport: tcp
     sourceOnDemand: false
   parking-sub:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.61:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.210:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
     rtspTransport: tcp
     sourceOnDemand: false

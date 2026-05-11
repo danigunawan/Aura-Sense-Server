@@ -276,17 +276,20 @@ def _set_static_ip_sync(
         raise RuntimeError(f"{host}: no network interface found via ONVIF")
 
     # ── Build SetNetworkInterfaces request ─────────────────────────────────
+    # NB: the schema for IPv4NetworkInterfaceSetConfiguration is FLAT
+    # ({Enabled, Manual, DHCP}). The nested `Config` wrapper that appears in
+    # the Get-side response type does NOT exist here — passing it triggers a
+    # zeep validation error ("The ReferenceToken type doesn't accept
+    # collections as value") before any SOAP is sent.
     req = cam.devicemgmt.create_type('SetNetworkInterfaces')
     req.InterfaceToken = token
     req.NetworkInterface = {
+        'Enabled': True,
         'IPv4': {
             'Enabled': True,
-            'Config': {
-                'DHCP': False,
-                'Manual': [{'Address': static_ip, 'PrefixLength': prefix_len}],
-            },
+            'Manual': [{'Address': static_ip, 'PrefixLength': prefix_len}],
+            'DHCP': False,
         },
-        'IPv6': {'Enabled': False},
     }
 
     # Optional: set default gateway and DNS (best-effort — some cameras ignore these)

@@ -14,7 +14,6 @@ ExecStart=/home/aura/Documents/aurasense/mediamtx \
 # Restart on any failure; cameras may take 60 s to boot after power loss
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=0     # never give up
 
 # Graceful shutdown
 TimeoutStopSec=10

@@ -120,17 +120,20 @@ class DiscoveryService:
             len(devices), added, errors,
         )
 
-        # Regenerate YAML after every cycle so restarts pick up any changes.
-        if added > 0:
-            cameras = await self._db.get_online()
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                mediamtx_sync.regenerate_yml,
-                cameras,
-                self._cfg.mediamtx_base_yml,
-                self._cfg.mediamtx_yml,
-            )
+        # Regenerate YAML every cycle that found devices — runtime API and YAML
+        # can diverge whenever a camera's IP changes (e.g. link-local→static
+        # via reassert), and the comment above used to say "every cycle" but
+        # the `added > 0` guard meant existing-camera updates never rewrote
+        # the file. On the next mediamtx restart it'd reload stale URLs.
+        cameras = await self._db.get_online()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            mediamtx_sync.regenerate_yml,
+            cameras,
+            self._cfg.mediamtx_base_yml,
+            self._cfg.mediamtx_yml,
+        )
 
         return added
 
@@ -173,14 +176,30 @@ class DiscoveryService:
         name = await self._assign_name(info.device_uuid)
         slug = await self._assign_slug(info.device_uuid, name)
 
-        # Snapshot the prior row before upsert overwrites ip_address — we need
-        # the camera's last-known good IP to recover it from link-local fallback.
+        # Snapshot the prior row before any upsert — we need the camera's
+        # last-known good IP to recover it from link-local fallback.
         prior = await self._db.get_by_uuid(info.device_uuid)
         prior_good_ip = (
             prior.ip_address
             if prior and prior.ip_address and not _is_link_local(prior.ip_address)
             else None
         )
+
+        # Recovery short-circuit: camera fell back to link-local but we know
+        # its prior good IP. Push that IP back via ONVIF and skip the rest of
+        # this cycle. Do NOT upsert the link-local host into the DB — that
+        # would clobber prior_good_ip and break retry on the next cycle if
+        # this reassert call fails. Do NOT sync mediamtx either — any URL we'd
+        # push would be link-local and become stale the moment the camera
+        # reboots onto the target IP. The next discovery cycle will see the
+        # camera at its restored address and upsert normally there.
+        if _is_link_local(device.ip_address) and prior_good_ip and prior is not None:
+            log.info(
+                "Camera '%s' on link-local %s — re-asserting prior %s; skipping DB/mediamtx until camera reboots",
+                prior.name, device.ip_address, prior_good_ip,
+            )
+            await self._reassert_ip(prior, device.ip_address, prior_good_ip)
+            return False
 
         camera = Camera(
             device_uuid       = info.device_uuid,
@@ -216,14 +235,8 @@ class DiscoveryService:
         else:
             log.info("Updated existing camera '%s' @ %s", name, host)
 
-        # Camera fell back to IPv4 link-local — push its previously-known IP
-        # back via ONVIF so mediamtx (which only routes to the camera subnet)
-        # can reach it again. Camera reboots; the next cycle picks it up at
-        # the recovered address.
-        if _is_link_local(host) and prior_good_ip:
-            await self._reassert_ip(camera, host, prior_good_ip)
         # New camera with no prior IP — fall through to the pool flow if it's enabled.
-        elif is_new and self._cfg.static_ip_enabled:
+        if is_new and self._cfg.static_ip_enabled:
             await self._assign_static_ip(camera, host)
 
         # Hot-add paths to running mediamtx (non-blocking, failures tolerated).
