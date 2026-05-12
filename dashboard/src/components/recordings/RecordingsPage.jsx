@@ -20,7 +20,20 @@ import { api } from '../../api/client.js';
  */
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export default function RecordingsPage({ cameras }) {
+export default function RecordingsPage({ cameras: rawCameras }) {
+  // useCameras() polls the API every 30 s and calls setCameras(data.items)
+  // with a fresh array each time, so the prop reference flips even when the
+  // camera list is unchanged. Without stabilization, every poll cascades:
+  // queues recomputes → queue-driver effect refires → either re-seeks the
+  // <video> back to the user's scrub offset (same firstUrl) or reloads it
+  // with a freshly-signed URL, while the load-clips effect simultaneously
+  // refetches and snaps scrubMs to the latest clip — that snap is what made
+  // playback jump to the end of the day 10–30 s in. Key by camera IDs so
+  // downstream only sees a change when the actual camera list changes.
+  const camerasKey = rawCameras.map(c => c.id).sort((a, b) => a - b).join(',');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cameras = useMemo(() => rawCameras, [camerasKey]);
+
   // ── Date / clips ──────────────────────────────────────────────────────────
   const [selectedDate, setSelectedDate] = useState(() => isoDate(new Date()));
   const [clipsByCamera, setClipsByCamera] = useState({});  // { [camId]: Clip[] }
@@ -32,6 +45,11 @@ export default function RecordingsPage({ cameras }) {
   const [playheadMs, setPlayheadMs] = useState(12 * 60 * 60 * 1000);
   const [zoom,       setZoom]       = useState(8);                     // ×8 ≈ 3 h visible
   const [paused,     setPaused]     = useState(false);
+  // Tile expansion: when a tile is clicked, it fills the middle area while
+  // the date bar + timeline stay visible. All tiles stay mounted so the
+  // underlying <video> elements (and videoRefs) keep playing — non-expanded
+  // ones are just hidden via display:none.
+  const [expandedCameraId, setExpandedCameraId] = useState(null);
 
   const visibleMs   = Math.max(60_000, Math.floor(DAY_MS / zoom));
   const leftEdgeMs  = playheadMs - visibleMs / 2;
@@ -247,7 +265,12 @@ export default function RecordingsPage({ cameras }) {
         loading={loadingClips}
       />
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
+      <div style={{
+        flex:     1,
+        overflow: expandedCameraId !== null ? 'hidden' : 'auto',
+        padding: '12px 16px',
+        minHeight: 0,
+      }}>
         {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
         <CameraTilesGrid
           cameras={cameras}
@@ -255,6 +278,8 @@ export default function RecordingsPage({ cameras }) {
           videoRefs={videoRefs}
           scrubLabel={fmtTimeOfDay(playheadMs)}
           onDownload={downloadClipForCamera}
+          expandedCameraId={expandedCameraId}
+          onToggleExpand={(id) => setExpandedCameraId(prev => prev === id ? null : id)}
         />
       </div>
 
@@ -345,15 +370,17 @@ function ArrowButton({ children, ...rest }) {
 
 // ── Camera grid ─────────────────────────────────────────────────────────────
 
-function CameraTilesGrid({ cameras, queues, videoRefs, scrubLabel, onDownload }) {
+function CameraTilesGrid({ cameras, queues, videoRefs, scrubLabel, onDownload, expandedCameraId, onToggleExpand }) {
   if (cameras.length === 0) {
     return <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>No cameras.</p>;
   }
+  const isExpanded = expandedCameraId !== null;
   return (
     <div style={{
       display:             'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-      gap:                  12,
+      gridTemplateColumns: isExpanded ? '1fr' : 'repeat(auto-fill, minmax(320px, 1fr))',
+      gap:                  isExpanded ? 0 : 12,
+      height:               isExpanded ? '100%' : 'auto',
     }}>
       {cameras.map(cam => (
         <CameraTile
@@ -363,13 +390,16 @@ function CameraTilesGrid({ cameras, queues, videoRefs, scrubLabel, onDownload })
           videoRefs={videoRefs}
           scrubLabel={scrubLabel}
           onDownload={() => onDownload(cam)}
+          expanded={expandedCameraId === cam.id}
+          hidden={isExpanded && expandedCameraId !== cam.id}
+          onToggleExpand={() => onToggleExpand(cam.id)}
         />
       ))}
     </div>
   );
 }
 
-function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload }) {
+function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload, expanded, hidden, onToggleExpand }) {
   const ref = useRef(null);
   // Callback ref: fires whenever the <video> mounts or unmounts. A useEffect
   // tied to [camera.id] only ran once at mount, when queue was still
@@ -381,24 +411,37 @@ function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload }) {
     else    videoRefs.current.delete(camera.id);
   }, [camera.id, videoRefs]);
 
-  const fullscreen = () => ref.current?.requestFullscreen?.();
+  // Stop the tile-level click handler from firing when the user is hitting
+  // one of the corner controls. Without this, downloading also toggles
+  // expand/collapse.
+  const stop = (fn) => (e) => { e.stopPropagation(); fn?.(); };
 
   return (
-    <div style={{
-      position:      'relative',
-      borderRadius:   8,
-      overflow:      'hidden',
-      background:    '#000',
-      aspectRatio:   '16 / 9',
-      border:        '1px solid var(--border)',
-    }}>
+    <div
+      onClick={onToggleExpand}
+      style={{
+        position:      'relative',
+        borderRadius:   expanded ? 0 : 8,
+        overflow:      'hidden',
+        background:    '#000',
+        aspectRatio:   expanded ? 'auto' : '16 / 9',
+        height:        expanded ? '100%' : undefined,
+        width:         expanded ? '100%' : undefined,
+        border:        expanded ? 'none' : '1px solid var(--border)',
+        display:       hidden ? 'none' : 'block',
+        cursor:        'pointer',
+      }}>
       {queue ? (
         <video
           ref={setVideoRef}
           muted
           playsInline
           controls={false}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          style={{
+            width:     '100%',
+            height:    '100%',
+            objectFit: expanded ? 'contain' : 'cover',
+          }}
         />
       ) : (
         <div style={{
@@ -420,9 +463,18 @@ function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload }) {
         alignItems:  'center',
         gap:          8,
         textShadow: '0 1px 4px rgba(0,0,0,0.9)',
+        pointerEvents: 'none',
       }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{camera.name}</span>
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>{scrubLabel}</span>
+        <span style={{ fontSize: expanded ? 16 : 13, fontWeight: 600 }}>{camera.name}</span>
+        <span style={{ fontSize: expanded ? 13 : 11, color: 'rgba(255,255,255,0.7)' }}>{scrubLabel}</span>
+        <span style={{ flex: 1 }} />
+        {expanded && (
+          <TileIconButton
+            title="Back to grid"
+            onClick={stop(onToggleExpand)}
+            style={{ pointerEvents: 'auto', width: 32, height: 32, fontSize: 16 }}
+          >✕</TileIconButton>
+        )}
       </div>
 
       <div style={{
@@ -432,14 +484,13 @@ function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload }) {
         display:    'flex',
         gap:         6,
       }}>
-        {queue && <TileIconButton title="Download" onClick={onDownload}>⤓</TileIconButton>}
-        {queue && <TileIconButton title="Fullscreen" onClick={fullscreen}>⛶</TileIconButton>}
+        {queue && <TileIconButton title="Download" onClick={stop(onDownload)}>⤓</TileIconButton>}
       </div>
     </div>
   );
 }
 
-function TileIconButton({ children, ...rest }) {
+function TileIconButton({ children, style, ...rest }) {
   return (
     <button
       {...rest}
@@ -452,6 +503,7 @@ function TileIconButton({ children, ...rest }) {
         color:         '#fff',
         fontSize:       14,
         cursor:        'pointer',
+        ...style,
       }}
     >{children}</button>
   );
