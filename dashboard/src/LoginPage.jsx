@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, setToken } from './api/client.js';
 
-export default function LoginPage({ onLogin }) {
+export default function LoginPage({ onLogin, onCancel }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading,  setLoading]  = useState(false);
@@ -24,15 +24,20 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div style={{
-      position:       'fixed',
-      inset:           0,
-      display:        'flex',
-      alignItems:     'center',
-      justifyContent: 'center',
-      background:     'var(--bg)',
-      overflow:       'hidden',
-    }}>
+    <div
+      onClick={(e) => { if (onCancel && e.target === e.currentTarget) onCancel(); }}
+      style={{
+        position:       'fixed',
+        inset:           0,
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'center',
+        background:     onCancel ? 'rgba(0,0,0,0.55)' : 'var(--bg)',
+        backdropFilter: onCancel ? 'blur(8px)' : undefined,
+        overflow:       'hidden',
+        zIndex:         9999,
+      }}
+    >
       {/* Ambient glow mesh */}
       <div style={{
         position:   'absolute',
@@ -51,7 +56,7 @@ export default function LoginPage({ onLogin }) {
       }} />
 
       {/* Card */}
-      <div style={{
+      <div onClick={(e) => e.stopPropagation()} style={{
         position:       'relative',
         width:           390,
         background:     'rgba(18, 18, 18, 0.82)',

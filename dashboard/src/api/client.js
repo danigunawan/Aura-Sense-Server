@@ -40,9 +40,23 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+export function decodeTokenRole(token) {
+  if (!token) return null;
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64)).role || null;
+  } catch {
+    return null;
+  }
+}
+
 export const api = {
   login:         (username, password) =>
     request('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+
+  kioskToken:    () => request('/auth/kiosk-token', { method: 'POST' }),
 
   cameras:       (params = {}) => {
     const q = new URLSearchParams(params).toString();

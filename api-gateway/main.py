@@ -118,6 +118,27 @@ async def login(body: LoginRequest):
     return TokenResponse(access_token=token, expires_in=expires_in)
 
 
+# Hosts that are allowed to mint an unauthenticated kiosk viewer token.
+# Restricted to the loopback interface so a remote caller (cloudflared / LAN)
+# can never trade no credentials for a JWT — they still have to /auth/login.
+_KIOSK_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+@app.post("/auth/kiosk-token", response_model=TokenResponse, tags=["auth"])
+async def kiosk_token(request: Request):
+    """
+    Issue a low-privilege "viewer" JWT to the kiosk browser running on this
+    same box, so the live page can render without forcing a human login.
+    The token role is "viewer" — admin routes still require a real login.
+    """
+    client_host = (request.client.host if request.client else "") or ""
+    if client_host not in _KIOSK_LOCAL_HOSTS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Kiosk token is loopback-only")
+
+    token, expires_in = auth.issue_app_token("kiosk", "viewer")
+    return TokenResponse(access_token=token, expires_in=expires_in)
+
+
 @app.get("/auth/users", response_model=list[UserResponse], tags=["auth"])
 async def list_users(request: Request):
     """List all users. Admin only."""

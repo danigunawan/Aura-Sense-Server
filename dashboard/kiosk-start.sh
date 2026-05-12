@@ -70,7 +70,15 @@ fi
 # screen with no recovery. Wiping the profile each boot eliminates the trigger.
 PROFILE_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/aurasense-kiosk-profile"
 rm -rf "$PROFILE_DIR"
-mkdir -p "$PROFILE_DIR"
+mkdir -p "$PROFILE_DIR/Default"
+
+# Disable the Chromium "Save password?" / autosignin bubble. The command-line
+# flags for this were removed years ago — the only reliable kill switch is to
+# seed Default/Preferences with the prefs the password manager reads at start.
+# Written fresh on every boot because we wipe the profile above.
+cat > "$PROFILE_DIR/Default/Preferences" <<'JSON'
+{"credentials_enable_service":false,"credentials_enable_autosignin":false,"profile":{"password_manager_enabled":false}}
+JSON
 
 # ── 5. Force libva to skip the failing iHD probe ──────────────────────────────
 # Haswell systems have intel-media-va-driver installed but the iHD driver needs
@@ -83,20 +91,24 @@ export LIBVA_DRIVER_NAME=i965
 # Belt-and-braces: even with an ephemeral profile, any future Chrome regression
 # that drops the network service during initial asset fetch produces the same
 # unrecoverable white screen. Detect it by watching for a Chrome → :8000 TCP
-# connection. In a healthy boot Chrome opens one within a couple of seconds; if
-# no connection appears within ~40 s the page did not load — kill Chrome so
-# Restart=on-failure respawns us with a fresh profile.
+# connection. On Haswell cold boot, GPU init alone can take ~35 s before Chrome
+# emits its first log line, so we give it 180 s before declaring it stuck.
+# SIGTERM is followed by SIGKILL because Chrome traps SIGTERM during early
+# init and won't exit on its own — leaving systemd's Restart=on-failure unable
+# to respawn us. SIGKILL takes the parent down hard so the unit actually fails.
 (
     sleep 8
     start=$SECONDS
-    while [ $((SECONDS - start)) -lt 32 ]; do
+    while [ $((SECONDS - start)) -lt 172 ]; do
         if ss -tnp 2>/dev/null | grep '"chrome"' | grep -qE '127\.0\.0\.1:8000|\[::1\]:8000'; then
             exit 0
         fi
         sleep 3
     done
-    echo "[kiosk-watchdog] Chrome did not connect to API within 40 s — restarting kiosk." >&2
+    echo "[kiosk-watchdog] Chrome did not connect to API within 180 s — restarting kiosk." >&2
     pkill -TERM -f 'google-chrome.*--kiosk' || true
+    sleep 5
+    pkill -KILL -f 'google-chrome.*--kiosk' || true
 ) &
 
 echo "[kiosk] Launching: $BROWSER --kiosk $URL"
