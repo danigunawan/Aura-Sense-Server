@@ -5,11 +5,17 @@ import StatusDot from '../ui/StatusDot.jsx';
 // ── Top-level page ────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
+  // Lifted so DiscoverySection (which owns the scan trigger + status poll)
+  // can drive CamerasSection's refresh cadence — the latter polls the camera
+  // list every 2 s while a scan is in flight so new cameras appear as they're
+  // interrogated rather than only after the subprocess finishes.
+  const [scanning, setScanning] = useState(false);
+
   return (
     <div style={{ padding: '28px 32px', maxWidth: 860, margin: '0 auto' }}>
-      <DiscoverySection />
+      <DiscoverySection scanning={scanning} setScanning={setScanning} />
       <Divider />
-      <CamerasSection />
+      <CamerasSection scanning={scanning} />
       <Divider />
       <UsersSection />
       <Divider />
@@ -37,16 +43,15 @@ function SectionHeader({ title, subtitle }) {
 
 // ── Camera Discovery ──────────────────────────────────────────────────────────
 
-function DiscoverySection() {
+function DiscoverySection({ scanning, setScanning }) {
   const [status,   setStatus]   = useState(null);
-  const [scanning, setScanning] = useState(false);
   const [error,    setError]    = useState('');
 
   const fetchStatus = useCallback(() => {
     api.scanStatus()
       .then(s => { setStatus(s); setScanning(s.state === 'running'); })
       .catch(() => {});
-  }, []);
+  }, [setScanning]);
 
   useEffect(() => {
     fetchStatus();
@@ -126,7 +131,7 @@ function DiscoverySection() {
           gap: 10,
         }}>
           <Spinner size={14} />
-          Sending WS-Discovery probes across all network interfaces… This takes ~30 seconds.
+          Probing the camera network — newly discovered cameras will appear in the list below.
         </div>
       )}
 
@@ -139,7 +144,7 @@ function DiscoverySection() {
 
 // ── Camera Management ─────────────────────────────────────────────────────────
 
-function CamerasSection() {
+function CamerasSection({ scanning }) {
   const [cameras,   setCameras]   = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [editing,   setEditing]   = useState(null);   // camera id being renamed
@@ -147,14 +152,60 @@ function CamerasSection() {
   const [deleting,  setDeleting]  = useState(null);   // camera to confirm-delete
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState('');
+  const [syncingId, setSyncingId] = useState(null);   // camera currently being time-synced
+  const [toast,     setToast]     = useState('');     // transient success message
+  const [newIds,    setNewIds]    = useState(() => new Set());  // ids to flash green
+  const prevIdsRef = useRef(null);
 
   const load = useCallback(() => {
     api.cameras({ limit: 100 })
-      .then(d => { setCameras(d.items); setLoading(false); })
+      .then(d => {
+        // Flag IDs that weren't in the previous snapshot — flashed green for ~3 s.
+        const incoming = new Set(d.items.map(c => c.id));
+        if (prevIdsRef.current !== null) {
+          const fresh = [...incoming].filter(id => !prevIdsRef.current.has(id));
+          if (fresh.length > 0) {
+            setNewIds(prev => {
+              const next = new Set(prev);
+              fresh.forEach(id => next.add(id));
+              return next;
+            });
+            fresh.forEach(id => {
+              setTimeout(() => {
+                setNewIds(prev => {
+                  const next = new Set(prev);
+                  next.delete(id);
+                  return next;
+                });
+              }, 3000);
+            });
+          }
+        }
+        prevIdsRef.current = incoming;
+        setCameras(d.items);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // While a scan is running, refresh the list every 2 s so cameras appear as
+  // discovery interrogates them — the discovery subprocess upserts to the DB
+  // after each successful ONVIF probe, so polling reflects real progress.
+  useEffect(() => {
+    if (!scanning) return;
+    const id = setInterval(load, 2000);
+    return () => clearInterval(id);
+  }, [scanning, load]);
+
+  // One final reload when a scan finishes so we never miss a late arrival
+  // between the last interval tick and the status transition.
+  const prevScanning = useRef(scanning);
+  useEffect(() => {
+    if (prevScanning.current && !scanning) load();
+    prevScanning.current = scanning;
+  }, [scanning, load]);
 
   function startEdit(cam) {
     setEditing(cam.id);
@@ -189,12 +240,30 @@ function CamerasSection() {
     }
   }
 
+  async function syncTime(cam) {
+    setSyncingId(cam.id);
+    setError('');
+    try {
+      await api.syncCameraTime(cam.id);
+      setToast(`Time synced on ${cam.name}`);
+      setTimeout(() => setToast(''), 3000);
+    } catch (e) {
+      setError(`${cam.name}: ${e.message}`);
+    } finally {
+      setSyncingId(null);
+    }
+  }
+
   return (
     <div>
       <SectionHeader
         title="Cameras"
         subtitle="Manage discovered cameras. Deletion removes from database only — the physical camera is unaffected."
       />
+
+      {toast && (
+        <p style={{ fontSize: 12, color: 'var(--green, #34c759)', marginBottom: 12 }}>{toast}</p>
+      )}
 
       {error && (
         <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{error}</p>
@@ -224,7 +293,11 @@ function CamerasSection() {
             {cameras.map(cam => (
               <tr
                 key={cam.id}
-                style={{ borderBottom: '1px solid var(--border)' }}
+                style={{
+                  borderBottom: '1px solid var(--border)',
+                  background: newIds.has(cam.id) ? 'rgba(52,199,89,0.10)' : undefined,
+                  transition: 'background 1.2s ease-out',
+                }}
               >
                 <td style={{ padding: '10px 12px' }}>
                   {editing === cam.id ? (
@@ -262,6 +335,13 @@ function CamerasSection() {
                 </td>
                 <td style={{ padding: '10px 12px' }}>
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <IconButton
+                      onClick={() => syncTime(cam)}
+                      disabled={syncingId === cam.id}
+                      title="Sync camera clock to NVR time (ONVIF)"
+                    >
+                      {syncingId === cam.id ? '…' : '🕒'}
+                    </IconButton>
                     <IconButton onClick={() => startEdit(cam)} title="Rename">✏</IconButton>
                     <IconButton
                       onClick={() => { setDeleting(cam); setError(''); }}
