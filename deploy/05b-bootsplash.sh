@@ -44,6 +44,16 @@ update-alternatives --install \
     "$DST/aurasense.plymouth" 200 >/dev/null
 update-alternatives --set default.plymouth "$DST/aurasense.plymouth"
 
+# Ubuntu Server's initramfs.conf doesn't set FRAMEBUFFER, which gates the
+# plymouth hook (OPTION=FRAMEBUFFER in /usr/share/initramfs-tools/hooks/plymouth).
+# Without this, the hook is skipped on every update-initramfs run and no theme
+# ends up in the initrd — which silently breaks any boot splash.
+SPLASH_CONF=/etc/initramfs-tools/conf.d/splash
+if ! grep -qs "^FRAMEBUFFER=y" "$SPLASH_CONF" 2>/dev/null; then
+    echo "[05b] enable framebuffer in initramfs ($SPLASH_CONF)"
+    echo "FRAMEBUFFER=y" > "$SPLASH_CONF"
+fi
+
 echo "[05b] snapshot current initrd -> $BACKUP"
 cp -a --reflink=auto "$INITRD" "$BACKUP"
 
@@ -60,13 +70,19 @@ if ! update-initramfs -u -k "$KVER"; then
 fi
 
 echo "[05b] verify theme files are inside the new initrd"
-# Plymouth's initramfs hook copies the active theme dir into the image.
-# A loose basename match is enough — lsinitramfs prints paths without leading '/'.
-if ! lsinitramfs "$INITRD" | grep -Eq '(^|/)aurasense\.plymouth$'; then
-    echo "[05b] aurasense.plymouth NOT found in new initrd" >&2
+LOG="/tmp/05b-bootsplash-lsinitramfs.log"
+lsinitramfs "$INITRD" 2>&1 | grep -i plymouth > "$LOG" || true
+if ! grep -q "aurasense" "$LOG"; then
+    echo "[05b] aurasense not found in new initrd — dumping plymouth-related entries:" >&2
+    echo "----- $LOG -----" >&2
+    sed 's/^/  /' "$LOG" >&2 || true
+    echo "----------------" >&2
+    echo "[05b] alternative state:" >&2
+    update-alternatives --display default.plymouth 2>&1 | sed 's/^/  /' >&2 || true
     revert
     exit 1
 fi
+echo "[05b] verify OK — found $(grep -c aurasense "$LOG") aurasense entries in initrd"
 
 echo
 echo "[05b] active default.plymouth -> $(readlink -f /etc/alternatives/default.plymouth)"
