@@ -47,6 +47,7 @@ PHASES=(
     "03-deploy.sh     | Clone repo, build venvs, configure .env, install services"
     "04-hdd-setup.sh  | Format + mount recording HDD"
     "05-kiosk.sh      | Configure TTY1 autologin + cage kiosk service"
+    "05b-bootsplash.sh | Install breathing 6th Sense plymouth boot splash"
     "06-firewall.sh   | UFW firewall rules"
     "07-cloudflare.sh | Cloudflare tunnel setup"
     "08-verify.sh     | Verify all services"

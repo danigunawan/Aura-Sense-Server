@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=AuraSense
+Description=AuraSense breathing logo
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/aurasense
+ScriptFile=/usr/share/plymouth/themes/aurasense/aurasense.script

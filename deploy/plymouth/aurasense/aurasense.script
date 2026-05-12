@@ -1,0 +1,46 @@
+# AuraSense breathing-logo Plymouth theme
+# Plain black background, single centered logo, sine-wave alpha pulse.
+
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
+
+logo.image  = Image("logo.png");
+logo.sprite = Sprite();
+logo.sprite.SetImage(logo.image);
+logo.sprite.SetX(Window.GetX() + Window.GetWidth()  / 2 - logo.image.GetWidth()  / 2);
+logo.sprite.SetY(Window.GetY() + Window.GetHeight() / 2 - logo.image.GetHeight() / 2);
+logo.sprite.SetOpacity(1.0);
+
+# Breathing: alpha pulses 0.35..1.0 with ~3.0 s period.
+fun refresh_cb() {
+    t = Plymouth.GetTime();
+    s = Math.Sin(t * 2.0944);          # 2*pi/3
+    a = 0.675 + 0.325 * s;
+    logo.sprite.SetOpacity(a);
+}
+Plymouth.SetRefreshFunction(refresh_cb);
+
+# Empty hooks: keep plymouth happy, no extra UI.
+fun boot_progress_cb(time, progress) { }
+Plymouth.SetBootProgressFunction(boot_progress_cb);
+
+fun root_mounted_cb() { }
+Plymouth.SetRootMountedFunction(root_mounted_cb);
+
+fun display_normal_cb() { }
+Plymouth.SetDisplayNormalFunction(display_normal_cb);
+
+fun display_password_cb(prompt, bullets) { }
+Plymouth.SetDisplayPasswordFunction(display_password_cb);
+
+fun display_question_cb(prompt, entry) { }
+Plymouth.SetDisplayQuestionFunction(display_question_cb);
+
+fun message_cb(text) { }
+Plymouth.SetMessageFunction(message_cb);
+
+fun update_status_cb(status) { }
+Plymouth.SetUpdateStatusFunction(update_status_cb);
+
+fun quit_cb() { }
+Plymouth.SetQuitFunction(quit_cb);
