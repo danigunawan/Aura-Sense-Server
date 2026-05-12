@@ -87,8 +87,26 @@ def _build_paths_block(cameras: List) -> str:
         # Valid YAML with no paths
         return '  ~:\n    source: ""\n'
 
+    # Defensive dedupe — mediamtx refuses to load a YAML with duplicate mapping
+    # keys ("mapping key X already defined") and goes into a crash loop, taking
+    # down live view and recording for every camera, not just the duplicate.
+    # _assign_slug should make this impossible, but on rare DB corruption /
+    # manual SQL edits we've seen it happen — so we never trust the input here.
+    # First slug wins; subsequent collisions are logged loudly and dropped from
+    # the YAML (their tile in the dashboard will show as no-stream, which is
+    # better UX than the entire NVR going dark).
     lines = []
+    emitted: set[str] = set()
     for cam in cameras:
+        if cam.slug in emitted:
+            log.error(
+                "mediamtx.yml: duplicate slug '%s' (camera id=%s name=%r) — "
+                "skipping to keep mediamtx from crashing. Rename the camera "
+                "in the dashboard to give it a unique slug.",
+                cam.slug, getattr(cam, 'id', '?'), cam.name,
+            )
+            continue
+        emitted.add(cam.slug)
         for path_name, url in [
             (cam.slug,           cam.rtsp_url),
             (f"{cam.slug}-sub",  cam.sub_rtsp_url),

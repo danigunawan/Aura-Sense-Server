@@ -25,11 +25,15 @@ class Config:
     rtsp_user: str            = os.getenv('CAMERA_RTSP_USER', 'admin')
     rtsp_pass: str            = os.getenv('CAMERA_RTSP_PASS', '')
 
-    # Manufacturer allowlist (case-insensitive prefix match).
-    # Prama cameras may report "Prama", "Uniview", or "Hikvision" depending on OEM batch.
+    # Manufacturer allowlist — comma-separated, case-insensitive prefix match.
+    # Prama cameras may report "Prama", "ONVIF", "Uniview", or "Hikvision" depending on
+    # OEM batch and firmware version (older firmwares report "ONVIF" literally; newer
+    # ones report the real OEM name). List every value seen across the deployed fleet.
     # Run `python main.py --probe` to discover what your cameras actually report.
-    # Set to empty string '' to accept any manufacturer (useful for first-time probing only).
-    allowed_manufacturer: str = os.getenv('CAMERA_ALLOWED_MANUFACTURER', 'Prama')
+    # Leave empty to accept any manufacturer (useful for first-time probing only).
+    allowed_manufacturer: List[str] = field(default_factory=lambda: [
+        m.strip() for m in os.getenv('CAMERA_ALLOWED_MANUFACTURER', 'Prama,ONVIF').split(',') if m.strip()
+    ])
 
     # Optional model substring allowlist — comma-separated, case-insensitive.
     # Leave empty to accept all models from the allowed manufacturer.

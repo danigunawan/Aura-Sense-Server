@@ -78,7 +78,7 @@ async def interrogate(
     password: str,
     rtsp_user: str,
     rtsp_pass: str,
-    allowed_manufacturer: str,
+    allowed_manufacturer: list[str],
     allowed_models: list[str],
     timeout: int           = 10,
     max_attempts: int      = 3,
@@ -128,7 +128,7 @@ def _interrogate_sync(
     rtsp_user: str,
     rtsp_pass: str,
     device_url: str,
-    allowed_manufacturer: str,
+    allowed_manufacturer: list[str],
     allowed_models: list[str],
     timeout: int,
     max_attempts: int,
@@ -208,6 +208,73 @@ def _interrogate_sync(
         profile_token     = main_profile.token,
         sub_profile_token = sub_profile.token,
     )
+
+
+async def set_system_time(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    timeout: int = 10,
+) -> None:
+    """Push current UTC time to the camera via ONVIF SetSystemDateAndTime.
+
+    Uses DateTimeType="Manual" so the camera doesn't try to reach an NTP server
+    it can't see on the isolated cam subnet. Existing TimeZone and
+    DaylightSavings settings are preserved — we only correct the clock, the
+    OSD/UI display continues to render in local time.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _EXECUTOR,
+        _set_system_time_sync,
+        host, port, username, password, timeout,
+    )
+
+
+def _set_system_time_sync(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    timeout: int,
+) -> None:
+    from datetime import datetime, timezone
+
+    session = requests.Session()
+    session.verify = False
+    adapter = _LaxSSLAdapter()
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    transport = Transport(timeout=timeout, operation_timeout=timeout, session=session)
+
+    cam = ONVIFCamera(host, port, username, password, _WSDL_DIR, transport=transport)
+
+    # Preserve existing TZ/DST. ONVIF requires DaylightSavings even in Manual.
+    dst = False
+    tz_tz = ''
+    try:
+        cur = cam.devicemgmt.GetSystemDateAndTime()
+        dst = bool(getattr(cur, 'DaylightSavings', False))
+        tz_obj = getattr(cur, 'TimeZone', None)
+        if tz_obj is not None:
+            tz_tz = getattr(tz_obj, 'TZ', '') or ''
+    except Exception as exc:
+        log.debug("%s: GetSystemDateAndTime failed, using defaults (%s)", host, exc)
+
+    now = datetime.now(timezone.utc)
+    req = cam.devicemgmt.create_type('SetSystemDateAndTime')
+    req.DateTimeType    = 'Manual'
+    req.DaylightSavings = dst
+    if tz_tz:
+        req.TimeZone = {'TZ': tz_tz}
+    req.UTCDateTime = {
+        'Date': {'Year': now.year, 'Month': now.month, 'Day': now.day},
+        'Time': {'Hour': now.hour, 'Minute': now.minute, 'Second': now.second},
+    }
+    cam.devicemgmt.SetSystemDateAndTime(req)
+    log.info("%s: system time set to %sZ (tz=%s, dst=%s)",
+             host, now.strftime('%Y-%m-%dT%H:%M:%S'), tz_tz or '-', dst)
 
 
 async def set_static_ip(
@@ -328,15 +395,16 @@ def _check_allowlist(
     host: str,
     manufacturer: str,
     model: str,
-    allowed_manufacturer: str,
+    allowed_manufacturer: list[str],
     allowed_models: list[str],
 ) -> None:
     """Raise CameraRejected if this camera is not from the approved brand/model set."""
     if allowed_manufacturer:
-        if not manufacturer.lower().startswith(allowed_manufacturer.lower()):
+        mfr_lower = manufacturer.lower()
+        if not any(mfr_lower.startswith(m.lower()) for m in allowed_manufacturer):
             raise CameraRejected(
                 f"{host}: manufacturer '{manufacturer}' not in allowlist "
-                f"(expected '{allowed_manufacturer}')"
+                f"{allowed_manufacturer}"
             )
 
     if allowed_models:

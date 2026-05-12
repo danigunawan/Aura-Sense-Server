@@ -94,7 +94,7 @@ async def _cmd_probe() -> None:
             password             = cfg.onvif_pass,
             rtsp_user            = cfg.rtsp_user,
             rtsp_pass            = cfg.rtsp_pass,
-            allowed_manufacturer = '',   # no filter in probe mode
+            allowed_manufacturer = [],   # no filter in probe mode
             allowed_models       = [],
             timeout              = cfg.onvif_timeout,
             max_attempts         = 2,
@@ -117,6 +117,26 @@ async def _cmd_probe() -> None:
             ))
 
     print("\nTip: set CAMERA_ALLOWED_MANUFACTURER=<Manufacturer> in your .env file.")
+
+
+async def _cmd_sync_time(target: str) -> None:
+    """Push current UTC time to one camera (HOST or HOST:PORT) via ONVIF."""
+    from config import Config
+    import onvif_client
+
+    cfg = Config()
+    if not cfg.onvif_pass:
+        print("ERROR: CAMERA_ONVIF_PASS not set.", file=sys.stderr)
+        sys.exit(1)
+
+    host, _, port_s = target.partition(':')
+    port = int(port_s) if port_s else 80
+    try:
+        await onvif_client.set_system_time(host, port, cfg.onvif_user, cfg.onvif_pass)
+        print(f"Time synced to {host}:{port}")
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 async def _cmd_run(args: argparse.Namespace) -> None:
@@ -166,6 +186,8 @@ def main() -> None:
     mode.add_argument('--list',  action='store_true', help='Print cameras in DB and exit')
     mode.add_argument('--probe', action='store_true',
                       help='Discover cameras without allowlist filter — use for first-time setup')
+    mode.add_argument('--sync-time', metavar='HOST:PORT',
+                      help='Push current UTC time to one camera via ONVIF and exit')
     args = parser.parse_args()
 
     if args.list:
@@ -175,6 +197,10 @@ def main() -> None:
 
     if args.probe:
         asyncio.run(_cmd_probe())
+        sys.exit(0)
+
+    if args.sync_time:
+        asyncio.run(_cmd_sync_time(args.sync_time))
         sys.exit(0)
 
     asyncio.run(_cmd_run(args))

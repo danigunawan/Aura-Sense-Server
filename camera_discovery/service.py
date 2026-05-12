@@ -32,6 +32,13 @@ class DiscoveryService:
         self._cfg = config
         self._db  = db
         self._running = False
+        # Serializes name/slug claim + initial upsert across concurrent
+        # _process_device calls — without this, two cameras discovered in the
+        # same cycle can read the same "used names" snapshot and both pick the
+        # same default name (seen in production: two cameras both named
+        # "Parking", which then collided as duplicate slugs in mediamtx.yml
+        # and put mediamtx into a crash loop).
+        self._assign_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -163,8 +170,11 @@ class DiscoveryService:
                 auto_configure_gop   = self._cfg.auto_configure_gop,
             )
         except onvif_client.CameraRejected as exc:
-            # Not a Prama camera — expected on any LAN. Log at DEBUG to avoid noise.
-            log.debug("Skipping %s: %s", host, exc)
+            # Camera fails the manufacturer/model allowlist. On the isolated cam segment
+            # this is genuinely unexpected — log at INFO so the operator notices when a
+            # newly-deployed camera ships with firmware reporting a different
+            # Manufacturer string than the allowlist permits.
+            log.info("Skipping %s: %s", host, exc)
             return False
 
         if info is None:
@@ -173,53 +183,58 @@ class DiscoveryService:
             await self._db.log_event('auth_failed', msg, ip_address=host)
             return False
 
-        name = await self._assign_name(info.device_uuid)
-        slug = await self._assign_slug(info.device_uuid, name)
+        # Serialize name/slug claim + DB publish so concurrent _process_device
+        # calls in the same cycle never read the same "used names" set and
+        # both pick the same default. Lock is held for DB ops only (~ms);
+        # ONVIF interrogation above stays parallel.
+        async with self._assign_lock:
+            name = await self._assign_name(info.device_uuid)
+            slug = await self._assign_slug(info.device_uuid, name)
 
-        # Snapshot the prior row before any upsert — we need the camera's
-        # last-known good IP to recover it from link-local fallback.
-        prior = await self._db.get_by_uuid(info.device_uuid)
-        prior_good_ip = (
-            prior.ip_address
-            if prior and prior.ip_address and not _is_link_local(prior.ip_address)
-            else None
-        )
-
-        # Recovery short-circuit: camera fell back to link-local but we know
-        # its prior good IP. Push that IP back via ONVIF and skip the rest of
-        # this cycle. Do NOT upsert the link-local host into the DB — that
-        # would clobber prior_good_ip and break retry on the next cycle if
-        # this reassert call fails. Do NOT sync mediamtx either — any URL we'd
-        # push would be link-local and become stale the moment the camera
-        # reboots onto the target IP. The next discovery cycle will see the
-        # camera at its restored address and upsert normally there.
-        if _is_link_local(device.ip_address) and prior_good_ip and prior is not None:
-            log.info(
-                "Camera '%s' on link-local %s — re-asserting prior %s; skipping DB/mediamtx until camera reboots",
-                prior.name, device.ip_address, prior_good_ip,
+            # Snapshot the prior row before any upsert — we need the camera's
+            # last-known good IP to recover it from link-local fallback.
+            prior = await self._db.get_by_uuid(info.device_uuid)
+            prior_good_ip = (
+                prior.ip_address
+                if prior and prior.ip_address and not _is_link_local(prior.ip_address)
+                else None
             )
-            await self._reassert_ip(prior, device.ip_address, prior_good_ip)
-            return False
 
-        camera = Camera(
-            device_uuid       = info.device_uuid,
-            ip_address        = device.ip_address,
-            port              = port,
-            device_url        = url,
-            manufacturer      = info.manufacturer,
-            model             = info.model,
-            serial_number     = info.serial_number,
-            firmware_version  = info.firmware_version,
-            rtsp_url          = info.rtsp_url,
-            sub_rtsp_url      = info.sub_rtsp_url,
-            profile_token     = info.profile_token,
-            sub_profile_token = info.sub_profile_token,
-            slug              = slug,
-            name              = name,
-            status            = 'online',
-        )
+            # Recovery short-circuit: camera fell back to link-local but we know
+            # its prior good IP. Push that IP back via ONVIF and skip the rest of
+            # this cycle. Do NOT upsert the link-local host into the DB — that
+            # would clobber prior_good_ip and break retry on the next cycle if
+            # this reassert call fails. Do NOT sync mediamtx either — any URL we'd
+            # push would be link-local and become stale the moment the camera
+            # reboots onto the target IP. The next discovery cycle will see the
+            # camera at its restored address and upsert normally there.
+            if _is_link_local(device.ip_address) and prior_good_ip and prior is not None:
+                log.info(
+                    "Camera '%s' on link-local %s — re-asserting prior %s; skipping DB/mediamtx until camera reboots",
+                    prior.name, device.ip_address, prior_good_ip,
+                )
+                await self._reassert_ip(prior, device.ip_address, prior_good_ip)
+                return False
 
-        is_new = await self._db.upsert_camera(camera)
+            camera = Camera(
+                device_uuid       = info.device_uuid,
+                ip_address        = device.ip_address,
+                port              = port,
+                device_url        = url,
+                manufacturer      = info.manufacturer,
+                model             = info.model,
+                serial_number     = info.serial_number,
+                firmware_version  = info.firmware_version,
+                rtsp_url          = info.rtsp_url,
+                sub_rtsp_url      = info.sub_rtsp_url,
+                profile_token     = info.profile_token,
+                sub_profile_token = info.sub_profile_token,
+                slug              = slug,
+                name              = name,
+                status            = 'online',
+            )
+
+            is_new = await self._db.upsert_camera(camera)
 
         if is_new:
             log.info(
