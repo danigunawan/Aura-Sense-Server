@@ -32,9 +32,11 @@ _VAAPI_DEVICE = "/dev/dri/renderD128"
 
 def _signed_url(clip_id: int, endpoint: str) -> str:
     sig, exp = auth.sign_clip_url(clip_id, ttl_seconds=3600)
-    # Relative path — works through both the Vite dev proxy (/api → :8000)
-    # and production nginx (also mounts API under /api).
-    return f"/api/clips/{clip_id}/{endpoint}?sig={sig}&exp={exp}"
+    # Relative path matching how the router is mounted at root in main.py.
+    # The rest of the frontend hits /cameras, /auth/..., etc. with no prefix,
+    # so /api here would 404 on the kiosk (which serves dashboard + API from
+    # the same FastAPI app, no nginx /api strip in front).
+    return f"/clips/{clip_id}/{endpoint}?sig={sig}&exp={exp}"
 
 
 def _to_clip(row, camera_name: str) -> ClipResponse:

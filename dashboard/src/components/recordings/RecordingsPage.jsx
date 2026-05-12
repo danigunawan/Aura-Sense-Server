@@ -129,9 +129,8 @@ export default function RecordingsPage({ cameras }) {
       if (!q) { v.removeAttribute('src'); v.load(); continue; }
 
       queueIndexes.current.set(cam.id, 0);
-      // Only swap src if it differs — avoids reloading the same clip when
-      // unrelated state changes trigger a render.
       if (v.dataset.curUrl !== q.firstUrl) {
+        // Different clip: swap src, then seek + resume once metadata is in.
         v.dataset.curUrl = q.firstUrl;
         v.src = q.firstUrl;
         v.load();
@@ -139,6 +138,13 @@ export default function RecordingsPage({ cameras }) {
           try { v.currentTime = q.startSeekS; } catch (_) {}
           if (!pausedRef.current) v.play().catch(() => {});
         }, { once: true });
+      } else {
+        // Same clip, new offset inside it: seek immediately and resume.
+        // Without this the playhead visual moves but the <video> keeps
+        // running at its old position, then the 250 ms ticker snaps the
+        // playhead back — looks like the scrub did nothing.
+        try { v.currentTime = q.startSeekS; } catch (_) {}
+        if (!pausedRef.current) v.play().catch(() => {});
       }
     }
   }, [queues, cameras]);
@@ -365,9 +371,14 @@ function CameraTilesGrid({ cameras, queues, videoRefs, scrubLabel, onDownload })
 
 function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload }) {
   const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) videoRefs.current.set(camera.id, ref.current);
-    return () => { videoRefs.current.delete(camera.id); };
+  // Callback ref: fires whenever the <video> mounts or unmounts. A useEffect
+  // tied to [camera.id] only ran once at mount, when queue was still
+  // undefined and the <video> hadn't been rendered yet — so videoRefs never
+  // got populated and the parent's queue-driver always saw v === undefined.
+  const setVideoRef = useCallback((el) => {
+    ref.current = el;
+    if (el) videoRefs.current.set(camera.id, el);
+    else    videoRefs.current.delete(camera.id);
   }, [camera.id, videoRefs]);
 
   const fullscreen = () => ref.current?.requestFullscreen?.();
@@ -383,7 +394,7 @@ function CameraTile({ camera, queue, videoRefs, scrubLabel, onDownload }) {
     }}>
       {queue ? (
         <video
-          ref={ref}
+          ref={setVideoRef}
           muted
           playsInline
           controls={false}
