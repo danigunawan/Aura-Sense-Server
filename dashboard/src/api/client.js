@@ -74,6 +74,7 @@ export const api = {
     method: 'PATCH', body: JSON.stringify({ name }),
   }),
   deleteCamera:  (id)           => request(`/cameras/${id}`, { method: 'DELETE' }),
+  syncCameraTime:(id)           => request(`/cameras/${id}/sync-time`, { method: 'POST' }),
 
   scanStatus:    ()             => request('/discovery/status'),
   triggerScan:   ()             => request('/discovery/scan', { method: 'POST' }),

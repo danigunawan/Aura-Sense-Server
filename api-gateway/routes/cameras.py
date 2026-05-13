@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import Response
 
@@ -7,6 +8,11 @@ from deps import DB, User, Admin
 from models import CameraDetailResponse, CameraListResponse, CameraResponse, MessageResponse, UpdateCameraRequest
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
+
+# Reuse the camera_discovery venv (it owns onvif-zeep). Avoids duplicating
+# the dependency in the api-gateway venv.
+_DISCOVERY_DIR    = Path(__file__).parents[2] / "camera_discovery"
+_DISCOVERY_PYTHON = _DISCOVERY_DIR / ".venv" / "bin" / "python3"
 
 
 @router.get("", response_model=CameraListResponse)
@@ -138,6 +144,40 @@ async def get_snapshot(camera_id: int, db: DB, _user: User):
 
     return Response(content=stdout, media_type="image/jpeg",
                     headers={"Cache-Control": "max-age=10"})
+
+
+@router.post("/{camera_id}/sync-time", response_model=MessageResponse)
+async def sync_camera_time(camera_id: int, db: DB, _admin: Admin):
+    """Push the NVR's current UTC clock to the camera via ONVIF
+    SetSystemDateAndTime (Manual mode). Leaves the camera's TimeZone and DST
+    settings untouched. Admin only — wrong clock corrupts recording timestamps.
+    """
+    async with db.execute(
+        "SELECT ip_address, port FROM cameras WHERE id = ?", (camera_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Camera not found")
+
+    target = f"{row['ip_address']}:{row['port']}"
+    proc = await asyncio.create_subprocess_exec(
+        str(_DISCOVERY_PYTHON), "main.py", "--sync-time", target,
+        cwd=str(_DISCOVERY_DIR),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "ONVIF time sync timed out")
+
+    if proc.returncode != 0:
+        detail = (stderr or stdout).decode(errors='replace').strip()[:200] or "Unknown error"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Time sync failed: {detail}")
+
+    return MessageResponse(message=f"Time synced on {target}")
 
 
 @router.delete("/{camera_id}", response_model=MessageResponse)
