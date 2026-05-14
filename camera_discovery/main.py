@@ -139,6 +139,115 @@ async def _cmd_sync_time(target: str) -> None:
         sys.exit(1)
 
 
+async def _cmd_push_addressing(camera_id: int) -> None:
+    """
+    Push a static IP from the configured pool onto one camera (by DB id) via
+    ONVIF SetNetworkInterfaces, then reboot it. Idempotent: if a static IP was
+    already reserved for this camera, it gets re-asserted; otherwise the next
+    free IP in CAMERA_STATIC_IP_POOL_* is allocated and recorded in the DB.
+
+    Intended for the Settings → Cameras admin button, used to drag a camera
+    that's stuck on 169.254/16 link-local back onto the camera subnet.
+    """
+    import ipaddress
+    from config import Config
+    from database import CameraDB
+    import onvif_client
+
+    cfg = Config()
+    if not cfg.onvif_pass:
+        print("ERROR: CAMERA_ONVIF_PASS not set.", file=sys.stderr)
+        sys.exit(1)
+
+    db = CameraDB(cfg.db_path)
+    await db.connect()
+    try:
+        async with db._db.execute(
+            "SELECT device_uuid, ip_address, port, name, static_ip "
+            "FROM cameras WHERE id = ?",
+            (camera_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            print(f"ERROR: camera id {camera_id} not found", file=sys.stderr)
+            sys.exit(1)
+
+        current_host  = row['ip_address']
+        port          = row['port']
+        device_uuid   = row['device_uuid']
+        name          = row['name']
+        prior_static  = row['static_ip']
+
+        if prior_static:
+            # Reassert what was already reserved — idempotent retry.
+            target_ip = prior_static
+            allocated_now = False
+            print(f"Re-asserting saved static {target_ip} on '{name}' @ {current_host}")
+        else:
+            start  = ipaddress.IPv4Address(cfg.static_ip_start)
+            end    = ipaddress.IPv4Address(cfg.static_ip_end)
+            in_use = set(await db.get_assigned_static_ips())
+            target_ip = None
+            ip = start
+            while ip <= end:
+                cand = str(ip)
+                if cand not in in_use:
+                    target_ip = cand
+                    break
+                ip += 1
+            if target_ip is None:
+                print(
+                    f"ERROR: pool {cfg.static_ip_start}–{cfg.static_ip_end} exhausted "
+                    f"(reserve more or reclaim unused)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            # Reserve before the ONVIF call so concurrent pushes don't collide.
+            await db.update_static_ip(device_uuid, target_ip)
+            allocated_now = True
+            print(f"Allocated {target_ip} for '{name}' @ {current_host}")
+
+        # Same gateway-fallback rule as service._reassert_ip: when the pool
+        # config wasn't customised (still 192.168.1.1), fall back to the NVR's
+        # camera-NIC IP so we don't push an unreachable gateway onto cameras.
+        gateway = cfg.static_ip_gateway
+        if gateway == '192.168.1.1':
+            gateway = os.getenv('DISCOVERY_INTERFACE', '').strip() or gateway
+
+        try:
+            await onvif_client.set_static_ip(
+                host       = current_host,
+                port       = port,
+                username   = cfg.onvif_user,
+                password   = cfg.onvif_pass,
+                static_ip  = target_ip,
+                prefix_len = cfg.static_ip_prefix,
+                gateway    = gateway,
+                dns        = cfg.static_ip_dns,
+                timeout    = cfg.onvif_timeout,
+            )
+        except Exception as exc:
+            # Only release a reservation we made *this* call — leaving a prior
+            # reservation in place lets the next retry reuse the same IP.
+            if allocated_now:
+                await db.update_static_ip(device_uuid, None)
+            print(f"ERROR: ONVIF set_static_ip on {current_host}: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        await db.log_event(
+            'static_ip_pushed',
+            f"Pushed static IP {target_ip} to '{name}' (was {current_host}) via admin action",
+            camera_uuid = device_uuid,
+            ip_address  = current_host,
+        )
+        print(
+            f"OK: pushed {target_ip}/{cfg.static_ip_prefix} (gw {gateway}) to '{name}'. "
+            f"Camera is rebooting; it will reappear at the new address within ~60 s."
+        )
+    finally:
+        await db.close()
+
+
 async def _cmd_run(args: argparse.Namespace) -> None:
     from config import Config
     from database import CameraDB
@@ -188,6 +297,8 @@ def main() -> None:
                       help='Discover cameras without allowlist filter — use for first-time setup')
     mode.add_argument('--sync-time', metavar='HOST:PORT',
                       help='Push current UTC time to one camera via ONVIF and exit')
+    mode.add_argument('--push-addressing', metavar='CAMERA_ID', type=int,
+                      help='Push a static IP from the pool to one camera (by DB id) and exit')
     args = parser.parse_args()
 
     if args.list:
@@ -201,6 +312,10 @@ def main() -> None:
 
     if args.sync_time:
         asyncio.run(_cmd_sync_time(args.sync_time))
+        sys.exit(0)
+
+    if args.push_addressing is not None:
+        asyncio.run(_cmd_push_addressing(args.push_addressing))
         sys.exit(0)
 
     asyncio.run(_cmd_run(args))

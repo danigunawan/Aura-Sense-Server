@@ -75,6 +75,7 @@ export const api = {
   }),
   deleteCamera:  (id)           => request(`/cameras/${id}`, { method: 'DELETE' }),
   syncCameraTime:(id)           => request(`/cameras/${id}/sync-time`, { method: 'POST' }),
+  pushAddressing:(id)           => request(`/cameras/${id}/push-addressing`, { method: 'POST' }),
 
   scanStatus:    ()             => request('/discovery/status'),
   triggerScan:   ()             => request('/discovery/scan', { method: 'POST' }),

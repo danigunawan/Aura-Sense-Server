@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Phase 00b — Camera-NIC DHCP server (dnsmasq)
-# Hands out 10.42.0.10–250 to cameras on the camera NIC.
+# Hands out 10.42.0.10–99 to cameras on the camera NIC. The .100–.250 range
+# is reserved for the admin-assigned static-IP pool (CAMERA_STATIC_IP_POOL_*
+# in the discovery service .env) so DHCP can never collide with a static
+# reservation pushed via the Settings → Cameras "push addressing" button.
 # DNS disabled (cameras don't need it); listens only on the camera interface.
 
 set -euo pipefail
@@ -8,7 +11,7 @@ DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$DEPLOY_DIR/config.sh"
 
 CAM_RANGE_START="${CAM_RANGE_START:-10.42.0.10}"
-CAM_RANGE_END="${CAM_RANGE_END:-10.42.0.250}"
+CAM_RANGE_END="${CAM_RANGE_END:-10.42.0.99}"
 
 echo "[00b-camera-dhcp] Installing dnsmasq for camera NIC: $CAM_NIC"
 echo "  Lease range: $CAM_RANGE_START — $CAM_RANGE_END"

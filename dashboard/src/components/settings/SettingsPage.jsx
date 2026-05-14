@@ -153,6 +153,8 @@ function CamerasSection({ scanning }) {
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState('');
   const [syncingId, setSyncingId] = useState(null);   // camera currently being time-synced
+  const [pushingId, setPushingId] = useState(null);   // camera currently being IP-pushed
+  const [confirmPush, setConfirmPush] = useState(null); // camera to confirm before pushing
   const [toast,     setToast]     = useState('');     // transient success message
   const [newIds,    setNewIds]    = useState(() => new Set());  // ids to flash green
   const prevIdsRef = useRef(null);
@@ -254,6 +256,26 @@ function CamerasSection({ scanning }) {
     }
   }
 
+  async function pushAddressing(cam) {
+    setConfirmPush(null);
+    setPushingId(cam.id);
+    setError('');
+    try {
+      const res = await api.pushAddressing(cam.id);
+      // Server echoes the "OK: pushed X/N (gw Y) to '…'" line — surface it
+      // verbatim so the operator sees which IP was assigned.
+      setToast(res.message || `Static IP pushed to ${cam.name}`);
+      setTimeout(() => setToast(''), 6000);
+      // Camera is rebooting — kick off a refresh in ~30 s so the new IP shows
+      // up once the next scan cycle re-discovers it at the assigned address.
+      setTimeout(load, 30000);
+    } catch (e) {
+      setError(`${cam.name}: ${e.message}`);
+    } finally {
+      setPushingId(null);
+    }
+  }
+
   return (
     <div>
       <SectionHeader
@@ -342,6 +364,13 @@ function CamerasSection({ scanning }) {
                     >
                       {syncingId === cam.id ? '…' : '🕒'}
                     </IconButton>
+                    <IconButton
+                      onClick={() => { setConfirmPush(cam); setError(''); }}
+                      disabled={pushingId === cam.id}
+                      title="Push static IP from 10.42 pool — camera will reboot (ONVIF)"
+                    >
+                      {pushingId === cam.id ? '…' : '🌐'}
+                    </IconButton>
                     <IconButton onClick={() => startEdit(cam)} title="Rename">✏</IconButton>
                     <IconButton
                       onClick={() => { setDeleting(cam); setError(''); }}
@@ -371,6 +400,28 @@ function CamerasSection({ scanning }) {
               <Button onClick={() => setDeleting(null)}>Cancel</Button>
               <Button onClick={confirmDelete} disabled={saving} danger>
                 {saving ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Push-addressing confirmation */}
+      {confirmPush && (
+        <Modal onClose={() => setConfirmPush(null)}>
+          <div style={{ padding: '28px 28px 24px', width: 400 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Push Static IP</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>
+              Assign the next free static IP from the camera-network pool to{' '}
+              <strong>{confirmPush.name}</strong> ({confirmPush.ip_address}) and reboot it.
+              <br /><br />
+              The camera will be unreachable for ~60 s while it reboots, then reappear
+              at its new address on the next discovery cycle.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <Button onClick={() => setConfirmPush(null)}>Cancel</Button>
+              <Button onClick={() => pushAddressing(confirmPush)} primary>
+                Push and Reboot
               </Button>
             </div>
           </div>

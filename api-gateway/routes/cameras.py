@@ -180,6 +180,46 @@ async def sync_camera_time(camera_id: int, db: DB, _admin: Admin):
     return MessageResponse(message=f"Time synced on {target}")
 
 
+@router.post("/{camera_id}/push-addressing", response_model=MessageResponse)
+async def push_camera_addressing(camera_id: int, db: DB, _admin: Admin):
+    """Push a static IP from the configured pool onto the camera via ONVIF,
+    then reboot it. Used to recover cameras stranded on 169.254/16 link-local
+    by dragging them back onto the camera subnet (10.42.0.0/24). Admin only —
+    the camera is unreachable for ~60 s during the reboot.
+    """
+    async with db.execute(
+        "SELECT name FROM cameras WHERE id = ?", (camera_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Camera not found")
+
+    proc = await asyncio.create_subprocess_exec(
+        str(_DISCOVERY_PYTHON), "main.py", "--push-addressing", str(camera_id),
+        cwd=str(_DISCOVERY_DIR),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    # ONVIF SetNetworkInterfaces + SystemReboot on PRAMA cameras typically
+    # returns within 5–15 s; allow generous headroom for slow firmware.
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=45)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Push addressing timed out")
+
+    if proc.returncode != 0:
+        detail = (stderr or stdout).decode(errors='replace').strip()[:240] or "Unknown error"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Push addressing failed: {detail}")
+
+    # The subprocess prints "OK: pushed X/N (gw Y) to 'NAME'. ..." — propagate
+    # a trimmed version so the UI can show the assigned IP in its toast.
+    out = stdout.decode(errors='replace').strip().splitlines()
+    last = next((ln for ln in reversed(out) if ln.startswith('OK:')), None)
+    return MessageResponse(message=last or f"Pushed static IP to '{row['name']}'")
+
+
 @router.delete("/{camera_id}", response_model=MessageResponse)
 async def delete_camera(camera_id: int, db: DB, _user: Admin):
     """Remove a camera from the database. Admin only."""
