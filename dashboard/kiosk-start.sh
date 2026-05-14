@@ -125,8 +125,10 @@ exec "$BROWSER" \
     --password-store=basic \
     --use-mock-keychain \
     --disable-sync \
-    --enable-features=UseOzonePlatform \
+    --enable-features=UseOzonePlatform,VaapiVideoDecoder,VaapiIgnoreDriverChecks,AcceleratedVideoDecodeLinuxGL \
     --disable-features=Vulkan,TranslateUI,OverscrollHistoryNavigation,UseChromeOSDirectVideoDecoder \
+    --ignore-gpu-blocklist \
+    --enable-accelerated-video-decode \
     --use-angle=gl \
     --disable-session-crashed-bubble \
     --disable-restore-session-state \

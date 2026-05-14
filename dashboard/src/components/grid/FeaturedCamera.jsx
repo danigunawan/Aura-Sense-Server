@@ -3,7 +3,7 @@ import StatusDot from '../ui/StatusDot.jsx';
 import LivePlayer from '../player/LivePlayer.jsx';
 import { api } from '../../api/client.js';
 
-export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotClick, onOpen }) {
+export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotClick, onPrev, onNext, onOpen }) {
   const [hovered, setHovered] = useState(false);
   const [streamUrls, setStreamUrls] = useState(null);
 
@@ -150,6 +150,16 @@ export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotCl
         </div>
       )}
 
+      {/* Manual prev/next — auto-rotate is intentionally disabled so the
+          operator picks which camera to feature. e.stopPropagation prevents the
+          outer banner click handler from opening the player on every arrow tap. */}
+      {cameras.length > 1 && (
+        <>
+          <BannerArrow side="left"  onClick={e => { e.stopPropagation(); onPrev?.(); }} />
+          <BannerArrow side="right" onClick={e => { e.stopPropagation(); onNext?.(); }} />
+        </>
+      )}
+
       {/* Dot / pill indicators */}
       {cameras.length > 1 && (
         <div style={{
@@ -177,6 +187,42 @@ export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotCl
         @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
       `}</style>
     </div>
+  );
+}
+
+function BannerArrow({ side, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label={side === 'left' ? 'Previous camera' : 'Next camera'}
+      style={{
+        position:       'absolute',
+        top:            '50%',
+        [side]:          18,
+        transform:      'translateY(-50%)',
+        zIndex:          25,
+        width:           52,
+        height:          82,
+        borderRadius:    10,
+        background:      hovered ? 'rgba(20,20,20,0.85)' : 'rgba(10,10,10,0.55)',
+        backdropFilter: 'blur(14px)',
+        border:         '1px solid rgba(255,255,255,0.10)',
+        color:           hovered ? '#fff' : 'rgba(255,255,255,0.7)',
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'center',
+        cursor:         'pointer',
+        transition:     'background 0.15s, color 0.15s',
+      }}
+    >
+      {side === 'left'
+        ? <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+      }
+    </button>
   );
 }
 
