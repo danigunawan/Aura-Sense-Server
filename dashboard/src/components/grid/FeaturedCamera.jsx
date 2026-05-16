@@ -2,24 +2,27 @@ import { useState, useEffect } from 'react';
 import StatusDot from '../ui/StatusDot.jsx';
 import LivePlayer from '../player/LivePlayer.jsx';
 import { api } from '../../api/client.js';
+import { effectiveStatus, statusLabel, shouldShowLive } from '../../utils/cameraStatus.js';
 
 export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotClick, onPrev, onNext, onOpen }) {
   const [hovered, setHovered] = useState(false);
   const [streamUrls, setStreamUrls] = useState(null);
 
-  const isOffline = camera?.status !== 'online';
+  const status    = effectiveStatus(camera);
+  const canLive   = shouldShowLive(status);
+  const isOffline = !canLive;
 
   // Refetch stream URLs whenever the carousel rotates to a new camera. Reset
   // first so the previous camera's video doesn't briefly bleed into the new cell.
   useEffect(() => {
     setStreamUrls(null);
-    if (!camera || isOffline) return;
+    if (!camera || !canLive) return;
     let cancelled = false;
     api.streamUrls(camera.id)
       .then(u => { if (!cancelled) setStreamUrls(u); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [camera?.id, isOffline]);
+  }, [camera?.id, canLive]);
 
   const whepUrl = streamUrls?.webrtc_url ?? null;
 
@@ -78,48 +81,43 @@ export default function FeaturedCamera({ camera, cameras, featuredIndex, onDotCl
         pointerEvents: 'none',
       }} />
 
-      {/* Offline overlay */}
+      {/* Offline / check-wire overlay */}
       {isOffline && (
         <div style={{
           position: 'absolute', inset: 0,
           display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
-          gap: 10, color: 'rgba(255,255,255,0.15)',
+          gap: 14,
+          color: status === 'check_wire' ? '#FF9F0A' : 'rgba(255,255,255,0.18)',
+          background: status === 'check_wire' ? 'rgba(255,159,10,0.07)' : 'transparent',
         }}>
-          <OfflineIcon size={44} />
-          <span style={{ fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase' }}>
-            {camera.status === 'error' ? 'Connection Error' : 'Camera Offline'}
-          </span>
-        </div>
-      )}
-
-      {/* LIVE badge */}
-      {!isOffline && (
-        <div style={{
-          position: 'absolute', top: 28, left: 32,
-          display: 'flex', alignItems: 'center', gap: 6,
-          background: 'var(--live-red)', color: '#fff',
-          fontSize: 9, fontWeight: 800, letterSpacing: '0.18em',
-          padding: '4px 10px', borderRadius: 3, textTransform: 'uppercase',
-        }}>
+          {status === 'check_wire' ? <CheckWireBigIcon /> : <OfflineIcon size={44} />}
           <span style={{
-            width: 5, height: 5, borderRadius: '50%', background: '#fff',
-            animation: 'pulse 1.5s ease-in-out infinite',
-            display: 'inline-block', flexShrink: 0,
-          }} />
-          LIVE
+            fontSize: 18, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase',
+          }}>
+            {status === 'check_wire' ? 'Check Wire' :
+             status === 'error'       ? 'Connection Error' : 'Camera Offline'}
+          </span>
+          {status === 'check_wire' && (
+            <span style={{ fontSize: 12, color: 'rgba(255,159,10,0.85)', letterSpacing: '0.06em' }}>
+              No video reaching the NVR — check camera cable / PoE
+            </span>
+          )}
         </div>
       )}
 
       {/* Camera metadata (bottom-left) */}
       <div style={{ position: 'absolute', bottom: 44, left: 36, right: 160 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <StatusDot status={camera.status} size={7} />
+          <StatusDot status={status} size={7} />
           <span style={{
-            fontSize: 11, color: 'rgba(255,255,255,0.45)',
-            letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 500,
+            fontSize: 11,
+            color: status === 'check_wire' ? '#FF9F0A' : 'rgba(255,255,255,0.45)',
+            letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
           }}>
-            {cameras.length > 1 ? `${featuredIndex + 1} of ${cameras.length}` : 'Featured Camera'}
+            {status === 'check_wire'
+              ? statusLabel(status)
+              : (cameras.length > 1 ? `${featuredIndex + 1} of ${cameras.length}` : 'Featured Camera')}
           </span>
         </div>
         <h2 style={{
@@ -241,6 +239,15 @@ function OfflineIcon({ size = 28 }) {
       <path d="M14 5h2a2 2 0 012 2v3"/>
       <line x1="2" y1="2" x2="22" y2="22"/>
       <path d="M22 9l-4 4-4-4"/>
+    </svg>
+  );
+}
+
+function CheckWireBigIcon() {
+  return (
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12h4l2-3 4 6 2-3h4" />
+      <line x1="2" y1="2" x2="22" y2="22" opacity="0.6" />
     </svg>
   );
 }
