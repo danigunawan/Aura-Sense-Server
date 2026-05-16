@@ -1,74 +1,73 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { useCameras, useSystemStatus } from './hooks/useCameras.js';
-import NavBar      from './components/layout/NavBar.jsx';
-import CameraGrid  from './components/grid/CameraGrid.jsx';
-import PlayerModal from './components/player/PlayerModal.jsx';
+import NavBar         from './components/layout/NavBar.jsx';
+import CameraGrid     from './components/grid/CameraGrid.jsx';
+import PlayerModal    from './components/player/PlayerModal.jsx';
 import RecordingsPage from './components/recordings/RecordingsPage.jsx';
-import SettingsPage from './components/settings/SettingsPage.jsx';
-import LoginPage from './LoginPage.jsx';
+import SettingsPage   from './components/settings/SettingsPage.jsx';
+import LoginPage      from './LoginPage.jsx';
 
 export default function App({ locked = false, onUnlock }) {
-  const [page,       setPage]     = useState('live');
-  const [selected,   setSelected] = useState(null);   // { camera, streamUrls }
-  const [navVisible, setNavVisible] = useState(true);
-  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [page,        setPage]        = useState('live');
+  const [selected,    setSelected]    = useState(null);   // { camera, streamUrls }
+  const [unlockOpen,  setUnlockOpen]  = useState(false);
+  const [pendingPage, setPendingPage] = useState(null);
 
-  const { cameras } = useCameras();
+  const { cameras }  = useCameras();
   const systemStatus = useSystemStatus();
+  const gridScrollRef = useRef(null);
 
-  // Auto-hide nav after 4 s of mouse inactivity
-  const hideTimer = useRef(null);
-  const showNav = useCallback(() => {
-    setNavVisible(true);
-    clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setNavVisible(false), 4000);
-  }, []);
+  // Live page is open to everyone. Recordings / Settings / Events require login.
+  function handleNavChange(id) {
+    if (locked && id !== 'live') {
+      setPendingPage(id);
+      setUnlockOpen(true);
+    } else {
+      setPage(id);
+    }
+  }
 
-  useEffect(() => {
-    showNav();
-    document.addEventListener('mousemove', showNav);
-    return () => {
-      document.removeEventListener('mousemove', showNav);
-      clearTimeout(hideTimer.current);
-    };
-  }, [showNav]);
-
-  // Keep nav always visible on non-live pages — except in locked mode, where
-  // the only allowed view IS the live page and clicks pop the unlock modal.
-  const isNavVisible = !locked && (navVisible || page !== 'live');
-  const effectivePage = locked ? 'live' : page;
+  // After a successful login, land on the page the user originally tapped.
+  function handleUnlock() {
+    const dest = pendingPage || 'live';
+    setUnlockOpen(false);
+    setPendingPage(null);
+    onUnlock?.();
+    setPage(dest);
+  }
 
   return (
     <div style={{ height: '100%', background: 'var(--bg)', overflow: 'hidden' }}>
       <NavBar
-        active={effectivePage}
-        onChange={setPage}
+        active={page}
+        onChange={handleNavChange}
         systemStatus={systemStatus}
-        visible={isNavVisible}
+        visible={true}
       />
 
-      {/* Main content — padded only when nav is always-on */}
-      <div style={{ height: '100%', paddingTop: effectivePage !== 'live' ? 'var(--nav-h)' : 0 }}>
-        {effectivePage === 'live' && (
+      {/* Live page: nav overlays content (no top padding). Other pages: nav sits above. */}
+      <div style={{ height: '100%', paddingTop: page !== 'live' ? 'var(--nav-h)' : 0 }}>
+        {page === 'live' && (
           <CameraGrid
             cameras={cameras}
             onOpenCamera={(cam, urls) => setSelected({ camera: cam, streamUrls: urls })}
+            scrollRef={gridScrollRef}
           />
         )}
-        {effectivePage === 'settings' && (
+        {page === 'settings' && (
           <div style={{ height: '100%', overflowY: 'auto' }}>
             <SettingsPage />
           </div>
         )}
-        {effectivePage === 'playback' && (
+        {page === 'playback' && (
           <RecordingsPage cameras={cameras} />
         )}
-        {effectivePage === 'alerts' && (
+        {page === 'alerts' && (
           <PlaceholderPage title="Alerts" subtitle="No alerts configured yet." />
         )}
       </div>
 
-      {selected && !locked && (
+      {selected && (
         <PlayerModal
           camera={selected.camera}
           prefetchedUrls={selected.streamUrls}
@@ -76,25 +75,10 @@ export default function App({ locked = false, onUnlock }) {
         />
       )}
 
-      {/* Locked: transparent overlay swallows every click and pops the unlock modal */}
-      {locked && !unlockOpen && (
-        <div
-          onClick={() => setUnlockOpen(true)}
-          onContextMenu={(e) => { e.preventDefault(); setUnlockOpen(true); }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9000,
-            background: 'transparent',
-            cursor: 'pointer',
-          }}
-        />
-      )}
-
-      {locked && unlockOpen && (
+      {unlockOpen && (
         <LoginPage
-          onLogin={() => { setUnlockOpen(false); onUnlock?.(); }}
-          onCancel={() => setUnlockOpen(false)}
+          onLogin={handleUnlock}
+          onCancel={() => { setUnlockOpen(false); setPendingPage(null); }}
         />
       )}
     </div>
