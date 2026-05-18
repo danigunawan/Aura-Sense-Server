@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List
+import json
 import os
 
 
@@ -41,6 +42,13 @@ class Config:
     allowed_models: List[str] = field(default_factory=lambda: [
         m.strip() for m in os.getenv('CAMERA_ALLOWED_MODELS', '').split(',') if m.strip()
     ])
+
+    # Extra credential pairs tried in order when the primary credentials fail.
+    # JSON list: [{"onvif_user":"admin","onvif_pass":"pw","rtsp_user":"admin","rtsp_pass":"pw"}, ...]
+    # rtsp_user/rtsp_pass default to onvif_user/onvif_pass if omitted.
+    extra_credentials: List[dict] = field(default_factory=lambda:
+        json.loads(os.getenv('CAMERA_EXTRA_CREDENTIALS', '[]'))
+    )
 
     # mediamtx integration — discovery regenerates the YAML and hot-adds paths via API.
     mediamtx_api: str         = os.getenv('MEDIAMTX_API', 'http://127.0.0.1:9997')

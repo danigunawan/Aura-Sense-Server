@@ -24,8 +24,9 @@ def sync_all_cameras(cameras: List, mediamtx_api: str) -> None:
     """Hot-add all camera paths to a running mediamtx instance."""
     for cam in cameras:
         if cam.rtsp_url and cam.sub_rtsp_url and cam.slug:
-            _upsert_path(cam.slug,           cam.rtsp_url,     always_on=True,  api=mediamtx_api)
-            _upsert_path(f"{cam.slug}-sub",  cam.sub_rtsp_url, always_on=True,  api=mediamtx_api)
+            fp = cam.tls_fingerprint or ''
+            _upsert_path(cam.slug,           cam.rtsp_url,     always_on=True,  api=mediamtx_api, fingerprint=fp)
+            _upsert_path(f"{cam.slug}-sub",  cam.sub_rtsp_url, always_on=True,  api=mediamtx_api, fingerprint=fp)
 
 
 def sync_camera(cam, mediamtx_api: str) -> None:
@@ -33,8 +34,9 @@ def sync_camera(cam, mediamtx_api: str) -> None:
     if not (cam.rtsp_url and cam.sub_rtsp_url and cam.slug):
         log.warning("Camera %s missing slug/rtsp_url — skipping mediamtx sync", cam.name)
         return
-    _upsert_path(cam.slug,           cam.rtsp_url,     always_on=True, api=mediamtx_api)
-    _upsert_path(f"{cam.slug}-sub",  cam.sub_rtsp_url, always_on=True, api=mediamtx_api)
+    fp = cam.tls_fingerprint or ''
+    _upsert_path(cam.slug,           cam.rtsp_url,     always_on=True, api=mediamtx_api, fingerprint=fp)
+    _upsert_path(f"{cam.slug}-sub",  cam.sub_rtsp_url, always_on=True, api=mediamtx_api, fingerprint=fp)
 
 
 def remove_camera(slug: str, mediamtx_api: str) -> None:
@@ -117,6 +119,8 @@ def _build_paths_block(cameras: List) -> str:
                 f'    rtspTransport: tcp',
                 f'    sourceOnDemand: false',
             ]
+            if cam.tls_fingerprint and url.startswith('rtsps://'):
+                lines.append(f'    sourceFingerprint: {cam.tls_fingerprint}')
     return '\n'.join(lines)
 
 
@@ -125,12 +129,14 @@ def _yml_str(s: str) -> str:
     return s.replace('\\', '\\\\').replace('"', '\\"')
 
 
-def _upsert_path(name: str, source: str, always_on: bool, api: str) -> None:
+def _upsert_path(name: str, source: str, always_on: bool, api: str, fingerprint: str = '') -> None:
     body = {
         'source': source,
         'rtspTransport': 'tcp',
         'sourceOnDemand': not always_on,
     }
+    if fingerprint and source.startswith('rtsps://'):
+        body['sourceFingerprint'] = fingerprint
     # Try PATCH first (path already exists), then POST (new path).
     for method, endpoint in [
         ('patch', f'{api}/v3/config/paths/patch/{name}'),

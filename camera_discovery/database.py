@@ -46,6 +46,7 @@ _NEW_COLUMNS: list[tuple[str, str]] = [
     ('sub_profile_token', 'TEXT'),
     ('slug',              "TEXT NOT NULL DEFAULT ''"),
     ('static_ip',         'TEXT'),
+    ('tls_fingerprint',   'TEXT'),
 ]
 
 
@@ -89,6 +90,7 @@ class CameraDB:
                     profile_token     = ?,
                     sub_profile_token = ?,
                     slug              = ?,
+                    tls_fingerprint   = ?,
                     status            = 'online',
                     last_seen         = ?,
                     last_error        = NULL
@@ -97,7 +99,7 @@ class CameraDB:
                     cam.ip_address, cam.port, cam.device_url,
                     cam.rtsp_url, cam.sub_rtsp_url,
                     cam.profile_token, cam.sub_profile_token,
-                    cam.slug, now, cam.device_uuid,
+                    cam.slug, cam.tls_fingerprint, now, cam.device_uuid,
                 ),
             )
             await self._db.commit()
@@ -108,15 +110,15 @@ class CameraDB:
                 device_uuid, ip_address, port, device_url,
                 manufacturer, model, serial_number, firmware_version,
                 rtsp_url, sub_rtsp_url, profile_token, sub_profile_token,
-                slug, name, status, created_at, last_seen
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'online',?,?)""",
+                slug, name, status, created_at, last_seen, tls_fingerprint
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'online',?,?,?)""",
             (
                 cam.device_uuid, cam.ip_address, cam.port, cam.device_url,
                 cam.manufacturer, cam.model, cam.serial_number, cam.firmware_version,
                 cam.rtsp_url, cam.sub_rtsp_url,
                 cam.profile_token, cam.sub_profile_token,
                 cam.slug, cam.name,
-                now, now,
+                now, now, cam.tls_fingerprint,
             ),
         )
         await self._db.commit()
@@ -130,12 +132,19 @@ class CameraDB:
         await self._db.commit()
 
     async def get_assigned_static_ips(self) -> List[str]:
-        """Return all static IPs already reserved in the DB (used for pool allocation)."""
+        """Return all IPs in use — both reserved via static_ip and current ip_address values.
+
+        Including ip_address prevents the allocator from handing out an IP that a
+        camera already lives on but whose static_ip column was never written (e.g.
+        cameras that were pre-configured on the hardware before this NVR knew them).
+        """
         async with self._db.execute(
-            "SELECT static_ip FROM cameras WHERE static_ip IS NOT NULL"
+            "SELECT static_ip AS ip FROM cameras WHERE static_ip IS NOT NULL"
+            " UNION "
+            "SELECT ip_address AS ip FROM cameras WHERE ip_address IS NOT NULL"
         ) as cur:
             rows = await cur.fetchall()
-        return [r["static_ip"] for r in rows]
+        return [r["ip"] for r in rows]
 
     async def update_static_ip(self, device_uuid: str, static_ip: str) -> None:
         """Record the static IP that was assigned to a camera via ONVIF."""
@@ -237,5 +246,6 @@ def _row_to_camera(row: aiosqlite.Row) -> Camera:
         name=row["name"],
         status=row["status"],
         static_ip=row["static_ip"] if "static_ip" in keys else None,
+        tls_fingerprint=row["tls_fingerprint"] if "tls_fingerprint" in keys else None,
         last_error=row["last_error"],
     )

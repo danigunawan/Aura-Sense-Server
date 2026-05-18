@@ -144,6 +144,41 @@ class DiscoveryService:
 
         return added
 
+    async def _interrogate_with_fallback(self, device) -> Optional[onvif_client.CameraInfo]:
+        """Try primary credentials then any extras; return first success or None."""
+        cfg = self._cfg
+        cred_list = [
+            (cfg.onvif_user, cfg.onvif_pass, cfg.rtsp_user, cfg.rtsp_pass),
+        ] + [
+            (
+                c['onvif_user'],
+                c['onvif_pass'],
+                c.get('rtsp_user', c['onvif_user']),
+                c.get('rtsp_pass', c['onvif_pass']),
+            )
+            for c in cfg.extra_credentials
+        ]
+
+        for onvif_user, onvif_pass, rtsp_user, rtsp_pass in cred_list:
+            info = await onvif_client.interrogate(
+                device               = device,
+                username             = onvif_user,
+                password             = onvif_pass,
+                rtsp_user            = rtsp_user,
+                rtsp_pass            = rtsp_pass,
+                allowed_manufacturer = cfg.allowed_manufacturer,
+                allowed_models       = cfg.allowed_models,
+                timeout              = cfg.onvif_timeout,
+                max_attempts         = cfg.max_retry_attempts,
+                base_delay           = cfg.retry_base_delay,
+                backoff              = cfg.retry_backoff,
+                auto_configure_gop   = cfg.auto_configure_gop,
+            )
+            if info is not None:
+                return info
+
+        return None
+
     async def _process_device(self, device) -> bool:
         """
         Interrogate one device and upsert into DB.
@@ -155,20 +190,7 @@ class DiscoveryService:
         log.info("Interrogating %s …", host)
 
         try:
-            info = await onvif_client.interrogate(
-                device               = device,
-                username             = self._cfg.onvif_user,
-                password             = self._cfg.onvif_pass,
-                rtsp_user            = self._cfg.rtsp_user,
-                rtsp_pass            = self._cfg.rtsp_pass,
-                allowed_manufacturer = self._cfg.allowed_manufacturer,
-                allowed_models       = self._cfg.allowed_models,
-                timeout              = self._cfg.onvif_timeout,
-                max_attempts         = self._cfg.max_retry_attempts,
-                base_delay           = self._cfg.retry_base_delay,
-                backoff              = self._cfg.retry_backoff,
-                auto_configure_gop   = self._cfg.auto_configure_gop,
-            )
+            info = await self._interrogate_with_fallback(device)
         except onvif_client.CameraRejected as exc:
             # Camera fails the manufacturer/model allowlist. On the isolated cam segment
             # this is genuinely unexpected — log at INFO so the operator notices when a
@@ -232,6 +254,7 @@ class DiscoveryService:
                 slug              = slug,
                 name              = name,
                 status            = 'online',
+                tls_fingerprint   = info.tls_fingerprint,
             )
 
             is_new = await self._db.upsert_camera(camera)

@@ -35,6 +35,7 @@ class Camera:
     name: str               # human-readable label
     status: str
     static_ip: Optional[str]       = None  # assigned static IP, None if still on DHCP
+    tls_fingerprint: Optional[str] = None  # SHA-256 cert fingerprint if camera uses RTSPS
     created_at: Optional[datetime] = None
     last_seen: Optional[datetime]  = None
     last_error: Optional[str]      = None

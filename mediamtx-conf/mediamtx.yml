@@ -22,19 +22,117 @@ hlsPartDuration:    200ms
 hlsSegmentMaxSize:  50MB
 
 paths:
-  entrance:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.86:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
-    rtspTransport: tcp
-    sourceOnDemand: false
-  entrance-sub:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.86:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
-    rtspTransport: tcp
-    sourceOnDemand: false
   parking:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.210:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.108:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
     rtspTransport: tcp
     sourceOnDemand: false
   parking-sub:
-    source: "rtsp://admin:Aurasmart7%2A@10.42.0.210:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.108:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
     rtspTransport: tcp
     sourceOnDemand: false
+  stairwell:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.113:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  stairwell-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.113:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  perimeter:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.104:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  perimeter-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.104:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  loading-dock:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.107:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  loading-dock-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.107:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  server-room:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.105:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  server-room-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.105:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  reception:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.111:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  reception-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.111:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  garage:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.112:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  garage-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.112:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  side-gate:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.110:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  side-gate-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.110:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  warehouse:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.100:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  warehouse-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.100:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  corridor:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.114:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  corridor-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.114:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  entrance:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.103:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  entrance-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.103:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  hallway:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.101:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  hallway-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.101:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  lobby:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.102:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  lobby-sub:
+    source: "rtsp://admin:Aurasmart7%2A@10.42.0.102:554/Streaming/Channels/102?transportmode=unicast&profile=Profile_2"
+    rtspTransport: tcp
+    sourceOnDemand: false
+  rooftop:
+    source: "rtsps://admin:Aurasmart7%2A%2A@10.42.0.150:554/video/live?channel=1&subtype=0"
+    rtspTransport: tcp
+    sourceOnDemand: false
+    sourceFingerprint: ec0b7a467f7f5340b234fc560a558b90cbf4b158501872413409b0bb2aee4647
+  rooftop-sub:
+    source: "rtsps://admin:Aurasmart7%2A%2A@10.42.0.150:554/video/live?channel=1&subtype=1"
+    rtspTransport: tcp
+    sourceOnDemand: false
+    sourceFingerprint: ec0b7a467f7f5340b234fc560a558b90cbf4b158501872413409b0bb2aee4647

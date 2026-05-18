@@ -53,6 +53,7 @@ class CameraInfo:
     sub_rtsp_url: str       # H265 sub stream
     profile_token: str      # main stream ONVIF profile token
     sub_profile_token: str  # sub stream ONVIF profile token
+    tls_fingerprint: Optional[str] = None  # set when camera uses RTSPS
 
 
 class _LaxSSLAdapter(HTTPAdapter):
@@ -191,6 +192,16 @@ def _interrogate_sync(
         if sub_profile.token != main_profile.token:
             _try_set_gop(media, sub_profile, auto_configure_gop, host)
 
+    # Detect RTSPS: probe TLS on the RTSP port. If the camera uses TLS (some
+    # brands like CP Plus require it), upgrade rtsp:// → rtsps:// and capture
+    # the cert fingerprint so mediamtx can validate without a CA chain.
+    rtsp_port = 554
+    tls_fp = _probe_rtsp_tls(host, rtsp_port)
+    if tls_fp:
+        rtsp_url     = rtsp_url.replace('rtsp://', 'rtsps://', 1)
+        sub_rtsp_url = sub_rtsp_url.replace('rtsp://', 'rtsps://', 1)
+        log.info("%s: RTSPS detected (fingerprint %s…)", host, tls_fp[:11])
+
     log.info(
         "Authenticated %s (%s %s) — main=%s sub=%s",
         host, manufacturer, model,
@@ -207,6 +218,7 @@ def _interrogate_sync(
         sub_rtsp_url      = sub_rtsp_url,
         profile_token     = main_profile.token,
         sub_profile_token = sub_profile.token,
+        tls_fingerprint   = tls_fp,
     )
 
 
@@ -423,7 +435,31 @@ def _get_stream_uri(media, profile_token: str, username: str, password: str) -> 
     }
     req.ProfileToken = profile_token
     uri = media.GetStreamUri(req)
-    return _embed_credentials(uri.Uri, username, password)
+    return _embed_credentials(_strip_onvif_params(uri.Uri), username, password)
+
+
+def _probe_rtsp_tls(host: str, port: int = 554) -> Optional[str]:
+    """Return SHA-256 fingerprint (colon-hex) if the port speaks TLS, else None."""
+    import ssl, socket, hashlib
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=3) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as tls:
+                cert_der = tls.getpeercert(binary_form=True)
+        return hashlib.sha256(cert_der).hexdigest()
+    except Exception:
+        return None
+
+
+def _strip_onvif_params(url: str) -> str:
+    """Remove ONVIF-only query params (proto=Onvif, unicast=true) that break plain RTSP."""
+    from urllib.parse import urlparse, urlencode, parse_qsl, urlunparse
+    parsed = urlparse(url)
+    _ONVIF_PARAMS = {'proto', 'unicast'}
+    qs = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() not in _ONVIF_PARAMS]
+    return urlunparse(parsed._replace(query=urlencode(qs)))
 
 
 def _try_set_gop(media, profile, gop: int, host: str) -> None:
