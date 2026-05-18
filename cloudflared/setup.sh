@@ -11,10 +11,11 @@ if [[ -z "$DOMAIN" ]]; then
     exit 1
 fi
 
-# ── Device ID from primary NIC MAC (no colons) ─────────────────────────────
-MAC=$(cat /sys/class/net/enp2s0/address 2>/dev/null | tr -d ':')
+# ── Device ID from internet NIC MAC (no colons) ─────────────────────────────
+# enp3s0 is the internet/management NIC; enp2s0 is the isolated camera NIC.
+MAC=$(cat /sys/class/net/enp3s0/address 2>/dev/null | tr -d ':')
 if [[ -z "$MAC" ]]; then
-    echo "ERROR: could not read MAC from enp2s0"
+    echo "ERROR: could not read MAC from enp3s0"
     exit 1
 fi
 DEVICE_ID="$MAC"
@@ -164,7 +165,7 @@ echo "    Config written to /etc/cloudflared/config.yml"
 
 # ── 6. Update api-gateway/.env ──────────────────────────────────────────────
 echo "[6/7] Updating api-gateway .env..."
-for KEY in MEDIAMTX_HLS_URL MEDIAMTX_URL NVR_DEVICE_ID; do
+for KEY in MEDIAMTX_HLS_URL MEDIAMTX_URL NVR_DEVICE_ID NVR_PUBLIC_URL; do
     sed -i "/^$KEY=/d" "$ENV_FILE"
 done
 cat >> "$ENV_FILE" << EOF
@@ -173,6 +174,7 @@ cat >> "$ENV_FILE" << EOF
 MEDIAMTX_HLS_URL=https://$STREAM_HOSTNAME
 MEDIAMTX_URL=https://$STREAM_HOSTNAME
 NVR_DEVICE_ID=$DEVICE_ID
+NVR_PUBLIC_URL=https://$API_HOSTNAME
 EOF
 echo "    .env updated."
 

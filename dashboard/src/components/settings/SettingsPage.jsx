@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, clearToken } from '../../api/client.js';
+import { QRCodeSVG } from 'qrcode.react';
+import { api, clearToken, decodeTokenRole } from '../../api/client.js';
 import StatusDot from '../ui/StatusDot.jsx';
+import { effectiveStatus, statusLabel } from '../../utils/cameraStatus.js';
 
 // ── Top-level page ────────────────────────────────────────────────────────────
 
@@ -18,6 +20,10 @@ export default function SettingsPage() {
       <CamerasSection scanning={scanning} />
       <Divider />
       <UsersSection />
+      <Divider />
+      <AppAccessSection />
+      <Divider />
+      <AccountSection />
       <Divider />
       <StorageSection />
       <Divider />
@@ -147,7 +153,7 @@ function DiscoverySection({ scanning, setScanning }) {
 function CamerasSection({ scanning }) {
   const [cameras,   setCameras]   = useState([]);
   const [loading,   setLoading]   = useState(true);
-  const [editing,   setEditing]   = useState(null);   // camera id being renamed
+  const [editPanel, setEditPanel] = useState(null);   // camera object opened in the edit modal
   const [editName,  setEditName]  = useState('');
   const [deleting,  setDeleting]  = useState(null);   // camera to confirm-delete
   const [saving,    setSaving]    = useState(false);
@@ -158,6 +164,14 @@ function CamerasSection({ scanning }) {
   const [toast,     setToast]     = useState('');     // transient success message
   const [newIds,    setNewIds]    = useState(() => new Set());  // ids to flash green
   const prevIdsRef = useRef(null);
+
+  // Keep the open edit panel in sync with the latest camera row (e.g. after a
+  // rename or a status refresh) so the modal doesn't show stale fields.
+  useEffect(() => {
+    if (!editPanel) return;
+    const fresh = cameras.find(c => c.id === editPanel.id);
+    if (fresh && fresh !== editPanel) setEditPanel(fresh);
+  }, [cameras, editPanel]);
 
   const load = useCallback(() => {
     api.cameras({ limit: 100 })
@@ -209,18 +223,25 @@ function CamerasSection({ scanning }) {
     prevScanning.current = scanning;
   }, [scanning, load]);
 
-  function startEdit(cam) {
-    setEditing(cam.id);
+  function openEdit(cam) {
+    setEditPanel(cam);
     setEditName(cam.name);
     setError('');
   }
 
-  async function saveEdit() {
-    if (!editName.trim()) return;
+  function closeEdit() {
+    setEditPanel(null);
+    setError('');
+  }
+
+  async function saveRename() {
+    const trimmed = editName.trim();
+    if (!trimmed || !editPanel || trimmed === editPanel.name) return;
     setSaving(true);
     try {
-      await api.renameCamera(editing, editName.trim());
-      setEditing(null);
+      await api.renameCamera(editPanel.id, trimmed);
+      setToast(`Renamed to ${trimmed}`);
+      setTimeout(() => setToast(''), 3000);
       load();
     } catch (e) {
       setError(e.message);
@@ -233,7 +254,9 @@ function CamerasSection({ scanning }) {
     setSaving(true);
     try {
       await api.deleteCamera(deleting.id);
+      const deletedId = deleting.id;
       setDeleting(null);
+      if (editPanel && editPanel.id === deletedId) setEditPanel(null);
       load();
     } catch (e) {
       setError(e.message);
@@ -322,69 +345,147 @@ function CamerasSection({ scanning }) {
                 }}
               >
                 <td style={{ padding: '10px 12px' }}>
-                  {editing === cam.id ? (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input
-                        autoFocus
-                        value={editName}
-                        onChange={e => setEditName(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(null); }}
-                        style={{
-                          ...inlineInputStyle,
-                          width: 130,
-                        }}
-                      />
-                      <IconButton onClick={saveEdit} disabled={saving} title="Save">✓</IconButton>
-                      <IconButton onClick={() => setEditing(null)} title="Cancel">✕</IconButton>
-                    </div>
-                  ) : (
-                    <span style={{ fontWeight: 500 }}>{cam.name}</span>
-                  )}
+                  <span style={{ fontWeight: 500 }}>{cam.name}</span>
                 </td>
                 <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                   {[cam.manufacturer, cam.model].filter(Boolean).join(' ') || '—'}
                 </td>
                 <td style={{ padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <StatusDot status={cam.status} size={6} />
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
-                      {cam.status}
-                    </span>
-                  </div>
+                  {(() => {
+                    const s = effectiveStatus(cam);
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <StatusDot status={s} size={6} />
+                        <span style={{
+                          fontSize: 11,
+                          color: s === 'check_wire' ? '#FF9F0A' : 'var(--text-secondary)',
+                          fontWeight: s === 'check_wire' ? 600 : 400,
+                        }}>
+                          {statusLabel(s)}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td style={{ padding: '10px 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
                   {formatRelative(cam.last_seen)}
                 </td>
                 <td style={{ padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <IconButton
-                      onClick={() => syncTime(cam)}
-                      disabled={syncingId === cam.id}
-                      title="Sync camera clock to NVR time (ONVIF)"
-                    >
-                      {syncingId === cam.id ? '…' : '🕒'}
-                    </IconButton>
-                    <IconButton
-                      onClick={() => { setConfirmPush(cam); setError(''); }}
-                      disabled={pushingId === cam.id}
-                      title="Push static IP from 10.42 pool — camera will reboot (ONVIF)"
-                    >
-                      {pushingId === cam.id ? '…' : '🌐'}
-                    </IconButton>
-                    <IconButton onClick={() => startEdit(cam)} title="Rename">✏</IconButton>
-                    <IconButton
-                      onClick={() => { setDeleting(cam); setError(''); }}
-                      title="Delete"
-                      danger
-                    >
-                      🗑
-                    </IconButton>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <IconButton onClick={() => openEdit(cam)} title="Edit camera">✏</IconButton>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {/* Camera edit panel */}
+      {editPanel && !deleting && !confirmPush && (
+        <Modal onClose={closeEdit}>
+          <div style={{ padding: '24px 26px 22px', width: 420 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700 }}>{editPanel.name}</h3>
+              <button
+                onClick={closeEdit}
+                style={{ color: 'var(--text-tertiary)', fontSize: 18, padding: 0, lineHeight: 1 }}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'var(--surface-mid)',
+              marginBottom: 16,
+              display: 'grid',
+              gridTemplateColumns: '90px 1fr',
+              rowGap: 6,
+              fontSize: 12,
+            }}>
+              <span style={{ color: 'var(--text-tertiary)' }}>IP address</span>
+              <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+                {editPanel.ip_address || '—'}
+              </span>
+              <span style={{ color: 'var(--text-tertiary)' }}>Model</span>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                {[editPanel.manufacturer, editPanel.model].filter(Boolean).join(' ') || '—'}
+              </span>
+              <span style={{ color: 'var(--text-tertiary)' }}>Status</span>
+              {(() => {
+                const s = effectiveStatus(editPanel);
+                return (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <StatusDot status={s} size={6} />
+                    <span style={{
+                      color: s === 'check_wire' ? '#FF9F0A' : 'var(--text-secondary)',
+                      fontWeight: s === 'check_wire' ? 600 : 400,
+                    }}>
+                      {statusLabel(s)}
+                    </span>
+                  </span>
+                );
+              })()}
+              <span style={{ color: 'var(--text-tertiary)' }}>Last seen</span>
+              <span style={{ color: 'var(--text-secondary)' }}>{formatRelative(editPanel.last_seen)}</span>
+            </div>
+
+            {error && (
+              <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{error}</p>
+            )}
+
+            <Field label="Name">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') closeEdit(); }}
+                  style={{ ...inlineInputStyle, flex: 1 }}
+                />
+                <Button
+                  onClick={saveRename}
+                  disabled={saving || !editName.trim() || editName.trim() === editPanel.name}
+                  primary
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </Field>
+
+            <div style={{ height: 1, background: 'var(--border)', margin: '18px 0 14px' }} />
+
+            <div style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: '0.05em',
+              textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: 10,
+            }}>
+              Actions
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Button
+                onClick={() => syncTime(editPanel)}
+                disabled={syncingId === editPanel.id}
+              >
+                {syncingId === editPanel.id ? 'Syncing time…' : '🕒  Push NVR Time'}
+              </Button>
+              <Button
+                onClick={() => { setConfirmPush(editPanel); setError(''); }}
+                disabled={pushingId === editPanel.id}
+              >
+                {pushingId === editPanel.id ? 'Pushing IP…' : '🌐  Push Static IP'}
+              </Button>
+              <Button
+                onClick={() => { setDeleting(editPanel); setError(''); }}
+                danger
+              >
+                🗑  Delete Camera
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Delete confirmation */}
@@ -439,6 +540,9 @@ function UsersSection() {
   const [showAdd,  setShowAdd]  = useState(false);
   const [form,     setForm]     = useState({ username: '', password: '', role: 'viewer' });
   const [deleting, setDeleting] = useState(null);
+  const [resetting, setResetting] = useState(null);  // user whose password we're resetting
+  const [resetPwd,  setResetPwd]  = useState('');
+  const [resetConfirm, setResetConfirm] = useState('');
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState('');
 
@@ -473,6 +577,30 @@ function UsersSection() {
       await api.deleteUser(deleting.username);
       setDeleting(null);
       load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReset(e) {
+    e.preventDefault();
+    if (resetPwd.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+    if (resetPwd !== resetConfirm) {
+      setError('Passwords do not match');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await api.resetUserPassword(resetting.username, resetPwd);
+      setResetting(null);
+      setResetPwd('');
+      setResetConfirm('');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -521,7 +649,15 @@ function UsersSection() {
                     {formatRelative(u.created_at)}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                      <IconButton
+                        onClick={() => {
+                          setResetting(u); setResetPwd(''); setResetConfirm(''); setError('');
+                        }}
+                        title="Reset password"
+                      >
+                        🔑
+                      </IconButton>
                       <IconButton
                         onClick={() => { setDeleting(u); setError(''); }}
                         title="Delete user"
@@ -605,7 +741,338 @@ function UsersSection() {
           </div>
         </Modal>
       )}
+
+      {/* Reset-password confirmation */}
+      {resetting && (
+        <Modal onClose={() => { setResetting(null); setError(''); }}>
+          <form onSubmit={handleReset} style={{ padding: '28px 28px 24px', width: 360 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>Reset Password</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>
+              Set a new password for <strong>{resetting.username}</strong>.
+              Their existing session keeps working until it expires.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              <Field label="New password">
+                <input
+                  autoFocus
+                  type="password"
+                  value={resetPwd}
+                  onChange={e => setResetPwd(e.target.value)}
+                  style={inlineInputStyle}
+                  placeholder="min 8 chars"
+                />
+              </Field>
+              <Field label="Confirm new password">
+                <input
+                  type="password"
+                  value={resetConfirm}
+                  onChange={e => setResetConfirm(e.target.value)}
+                  style={inlineInputStyle}
+                />
+              </Field>
+            </div>
+            {error && (
+              <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{error}</p>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <Button onClick={() => { setResetting(null); setError(''); }}>Cancel</Button>
+              <Button type="submit" disabled={saving} primary>
+                {saving ? 'Saving…' : 'Update'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
+  );
+}
+
+// ── App QR sign-in ────────────────────────────────────────────────────────────
+
+function AppAccessSection() {
+  const [invite,      setInvite]      = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState('');
+  const [secondsLeft, setSecondsLeft] = useState(0);
+
+  async function generate() {
+    setLoading(true);
+    setError('');
+    try {
+      const [urlRes, inv] = await Promise.all([api.nvrUrl(), api.createAppInvite('viewer')]);
+      const expiresAt = Date.now() + inv.expires_in * 1000;
+      setInvite({ ...inv, nvr_api_url: urlRes.nvr_public_url || inv.nvr_api_url, expiresAt });
+      setSecondsLeft(inv.expires_in);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!invite) return;
+    const id = setInterval(() => {
+      const left = Math.max(0, Math.round((invite.expiresAt - Date.now()) / 1000));
+      setSecondsLeft(left);
+      if (left === 0) { setInvite(null); clearInterval(id); }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [invite]);
+
+  const qrPayload = invite
+    ? JSON.stringify({ v: 1, server: invite.nvr_api_url, code: invite.code })
+    : '';
+
+  const mins = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
+  const secs = String(secondsLeft % 60).padStart(2, '0');
+
+  return (
+    <div>
+      <SectionHeader
+        title="App Access"
+        subtitle="Generate a QR code. Scan it with the 6th Sense app to sign in instantly — no password needed."
+      />
+
+      {error && (
+        <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{error}</p>
+      )}
+
+      <Button onClick={generate} disabled={loading || !!invite} primary>
+        {loading ? 'Generating…' : invite ? 'QR Active' : 'Generate App QR'}
+      </Button>
+
+      {invite && (
+        <Modal onClose={() => setInvite(null)}>
+          <div style={{ padding: '28px 28px 24px', textAlign: 'center', width: 340 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Scan to Sign In</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 18 }}>
+              Open the 6th Sense app → tap Scan QR
+            </p>
+            <div style={{
+              display: 'inline-block',
+              padding: 16,
+              background: '#ffffff',
+              borderRadius: 12,
+            }}>
+              <QRCodeSVG value={qrPayload} size={200} />
+            </div>
+            <p style={{
+              marginTop: 14,
+              fontSize: 13,
+              color: secondsLeft < 60 ? 'var(--red)' : 'var(--text-secondary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              Expires in {mins}:{secs}
+            </p>
+            <div style={{ marginTop: 16 }}>
+              <Button onClick={() => setInvite(null)}>Close</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Account (own password + system password) ────────────────────────────────
+
+function AccountSection() {
+  const role = decodeTokenRole(localStorage.getItem('nvr_token'));
+  const isAdmin = role === 'admin';
+
+  return (
+    <div>
+      <SectionHeader
+        title="Account"
+        subtitle="Update your dashboard password. Admins can also change the Linux account used for SSH and console login."
+      />
+      <OwnPasswordCard />
+      {isAdmin && (
+        <>
+          <div style={{ height: 18 }} />
+          <SystemPasswordCard />
+        </>
+      )}
+    </div>
+  );
+}
+
+function OwnPasswordCard() {
+  const [current, setCurrent]   = useState('');
+  const [next,    setNext]      = useState('');
+  const [confirm, setConfirm]   = useState('');
+  const [saving,  setSaving]    = useState(false);
+  const [error,   setError]     = useState('');
+  const [ok,      setOk]        = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(''); setOk(false);
+    if (next.length < 8)     { setError('New password must be at least 8 characters'); return; }
+    if (next !== confirm)    { setError('Passwords do not match'); return; }
+    if (next === current)    { setError('New password must differ from current'); return; }
+    setSaving(true);
+    try {
+      await api.changeOwnPassword(current, next);
+      setCurrent(''); setNext(''); setConfirm('');
+      setOk(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        padding: '16px 18px',
+        borderRadius: 10,
+        background: 'var(--surface)',
+        border: '1px solid var(--border-mid)',
+      }}
+    >
+      <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+        Your dashboard password
+      </h3>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <Field label="Current password">
+          <input
+            type="password"
+            value={current}
+            onChange={e => setCurrent(e.target.value)}
+            style={inlineInputStyle}
+            autoComplete="current-password"
+          />
+        </Field>
+        <Field label="New password">
+          <input
+            type="password"
+            value={next}
+            onChange={e => setNext(e.target.value)}
+            style={inlineInputStyle}
+            placeholder="min 8 chars"
+            autoComplete="new-password"
+          />
+        </Field>
+        <Field label="Confirm">
+          <input
+            type="password"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            style={inlineInputStyle}
+            autoComplete="new-password"
+          />
+        </Field>
+        <div style={{ display: 'flex', gap: 8, paddingBottom: 1 }}>
+          <Button type="submit" disabled={saving || !current || !next} primary>
+            {saving ? 'Saving…' : 'Update'}
+          </Button>
+        </div>
+      </div>
+      {error && (
+        <p style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>{error}</p>
+      )}
+      {ok && (
+        <p style={{ fontSize: 12, color: 'var(--green)', marginTop: 12 }}>
+          Password updated. Use the new password next time you sign in.
+        </p>
+      )}
+    </form>
+  );
+}
+
+function SystemPasswordCard() {
+  const [adminPwd, setAdminPwd] = useState('');
+  const [next,     setNext]     = useState('');
+  const [confirm,  setConfirm]  = useState('');
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState('');
+  const [ok,       setOk]       = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(''); setOk(false);
+    if (next.length < 8)  { setError('New password must be at least 8 characters'); return; }
+    if (next !== confirm) { setError('Passwords do not match'); return; }
+    setSaving(true);
+    try {
+      await api.changeSystemPassword(adminPwd, next);
+      setAdminPwd(''); setNext(''); setConfirm('');
+      setOk(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        padding: '16px 18px',
+        borderRadius: 10,
+        background: 'var(--surface)',
+        border: '1px solid var(--border-mid)',
+      }}
+    >
+      <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+        System login (aura)
+      </h3>
+      <p style={{
+        fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginBottom: 14,
+      }}>
+        Changes the Linux <code>aura</code> account used for SSH and console login.
+        The kiosk browser is unaffected. Make sure you remember the new password — losing it
+        means physical-console recovery.
+      </p>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <Field label="Your admin password">
+          <input
+            type="password"
+            value={adminPwd}
+            onChange={e => setAdminPwd(e.target.value)}
+            style={inlineInputStyle}
+            autoComplete="current-password"
+          />
+        </Field>
+        <Field label="New system password">
+          <input
+            type="password"
+            value={next}
+            onChange={e => setNext(e.target.value)}
+            style={inlineInputStyle}
+            placeholder="min 8 chars"
+            autoComplete="new-password"
+          />
+        </Field>
+        <Field label="Confirm">
+          <input
+            type="password"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            style={inlineInputStyle}
+            autoComplete="new-password"
+          />
+        </Field>
+        <div style={{ display: 'flex', gap: 8, paddingBottom: 1 }}>
+          <Button type="submit" disabled={saving || !adminPwd || !next} primary>
+            {saving ? 'Saving…' : 'Update'}
+          </Button>
+        </div>
+      </div>
+      {error && (
+        <p style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>{error}</p>
+      )}
+      {ok && (
+        <p style={{ fontSize: 12, color: 'var(--green)', marginTop: 12 }}>
+          System password updated. Use it next time you SSH or log in at the console.
+        </p>
+      )}
+    </form>
   );
 }
 
